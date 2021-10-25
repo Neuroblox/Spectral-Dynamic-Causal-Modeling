@@ -59,6 +59,7 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 
 # toy model dynamical system - Lorenz system
 function f!(dx, x::Vector, θ::Vector, t)
+    @show typeof(x) typeof(θ) typeof(t)
     dx[1] = θ[1] * (x[2] - x[1])
     dx[2] = x[1] * (θ[2] - x[3]) - x[2]
     dx[3] = x[1] * x[2] - θ[3] * x[3]
