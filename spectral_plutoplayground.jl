@@ -32,9 +32,6 @@ begin
 	using LinearAlgebra: I, Matrix
 end
 
-# ╔═╡ 4f2e3a42-58d0-46d3-a2d5-b2397ee9f398
-using LinearAlgebra: eigen
-
 # ╔═╡ 5ba41742-b91e-4487-8262-1c37a0e06e43
 function psd(x, Δt)
 	n = length(x)
@@ -161,9 +158,11 @@ md"""
 """
 
 # ╔═╡ 1e0da8d4-ac61-49d9-8a7b-9485f6961303
+# create AR(p) time series
+
 begin
 	N = 100
-	timelags = 2
+	timelags = 2   # = p
 	dim = 2
 	A = randn(timelags, dim)
 	A =  [0.887951  -0.755387; -0.121936  -1.00258]
@@ -172,7 +171,7 @@ begin
 	ϵ = MvNormal(zeros(dim), Σ)
 	Y = zeros(N, dim)
 	Y[1:timelags, :] = rand(timelags, dim)
-	for i = (timelags+1):100
+	for i = (timelags+1):N
 		Y[i, :] = sum(A.*Y[i-timelags:i-1, :], dims=1) + rand(ϵ)'
 	end
 end
@@ -184,9 +183,9 @@ end
 	ns, nd = size(x)
 	Σ ~ InverseWishart(nd*2, Matrix(1.0I, nd, nd))    # noise covariance matrix
 	beta ~ Product(Uniform.(-ones((p+1) * nd), ones((p+1) * nd)))   # linear model parameters
-	beta = reshape(beta, (p+1, nd))
-    for t in (p+1):N
-		μ = beta[:, 1] + sum(beta[2:end, :] .* x[t-p:t-1, :], dims=1)
+	beta = reshape(beta, (p+1, nd))   # get the parameters in the right matrix shape
+    for t in (p+1):ns
+		μ = vec(beta[1, :] + sum(beta[2:end, :] .* x[t-p:t-1, :], dims=1)')
         x[t, :] ~ MvNormal(μ, Σ)
     end
 end
@@ -195,10 +194,13 @@ end
 plot(Y)
 
 # ╔═╡ b56828ee-87c8-4d29-be86-1fcab3c69b03
-chain = sample(AR_process(Y, 2), NUTS(5000, 200, 0.65) )
+chain = sample(AR_process(Y, 2), NUTS(0.65), 1000)
 
-# ╔═╡ 032deec4-649d-4445-a89d-107b3c171652
-Y
+# ╔═╡ 0f6168bd-0645-4ef6-abbb-fe387451aa81
+chain[end]
+
+# ╔═╡ 6a1c7425-36ff-405e-932a-09c30cb1f7c3
+Σ
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1592,7 +1594,7 @@ version = "0.9.1+5"
 # ╠═1e0da8d4-ac61-49d9-8a7b-9485f6961303
 # ╠═608e6376-48af-4533-b7ae-87ba6d7a3f72
 # ╠═b56828ee-87c8-4d29-be86-1fcab3c69b03
-# ╠═4f2e3a42-58d0-46d3-a2d5-b2397ee9f398
-# ╠═032deec4-649d-4445-a89d-107b3c171652
+# ╠═0f6168bd-0645-4ef6-abbb-fe387451aa81
+# ╠═6a1c7425-36ff-405e-932a-09c30cb1f7c3
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
