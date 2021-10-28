@@ -57,6 +57,9 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 # Define priors etc.
 # Q, θμ, θΣ, λμ, λΣ
 
+# pE.A = A/128; θμ?
+
+
 # toy model dynamical system - Lorenz system
 function f!(dx, x::Vector, θ::Vector, t)
     @show typeof(x) typeof(θ) typeof(t)
