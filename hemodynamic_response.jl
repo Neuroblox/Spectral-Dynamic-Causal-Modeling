@@ -59,8 +59,8 @@ function g_fmri(x, ϵ)
     Simulated BOLD response to input
     FORMAT [g,dgdx] = g_fmri(x, ϵ)
     g          - BOLD response (%)
-    x          - hemodynamic state vector
-    ϵ          - free parameter, ratio of intra- to extra-vascular components
+    x          - hemodynamic state vector, same as above.
+    ϵ          - free parameter (note also here as above, actually ln(ϵ)), ratio of intra- to extra-vascular components
 
     This function implements the BOLD signal model described in: 
 
@@ -98,9 +98,9 @@ function g_fmri(x, ϵ)
     k3  = 1 - ep;
 
     # -Output equation of BOLD signal model
-    v   = exp(x(:,1))  # why do we take an exponential here??
-    q   = exp(x(:,2))
-    g   = V0*(k1 - k1*q + k2 - k2*q./v + k3 - k3*v)
+    ν   = exp(x[:,4])
+    q   = exp(x[:,5])
+    g   = V0*(k1 - k1*q + k2 - k2*q./ν + k3 - k3*ν)
 
 
     #= -derivative dgdx   # still need to figure out - these derivatives are strange!
