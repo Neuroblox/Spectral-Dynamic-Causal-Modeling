@@ -161,7 +161,7 @@ md"""
 # create AR(p) time series
 
 begin
-	N = 100
+	N = 1000
 	timelags = 2   # = p
 	dim = 2
 	A = randn(timelags, dim)
@@ -201,6 +201,9 @@ chain[end]
 
 # ╔═╡ 6a1c7425-36ff-405e-932a-09c30cb1f7c3
 Σ
+
+# ╔═╡ e513e510-fbe7-4615-92aa-2dbaf7b29c5b
+eig(A)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1596,5 +1599,6 @@ version = "0.9.1+5"
 # ╠═b56828ee-87c8-4d29-be86-1fcab3c69b03
 # ╠═0f6168bd-0645-4ef6-abbb-fe387451aa81
 # ╠═6a1c7425-36ff-405e-932a-09c30cb1f7c3
+# ╠═e513e510-fbe7-4615-92aa-2dbaf7b29c5b
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
