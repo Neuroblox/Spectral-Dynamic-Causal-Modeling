@@ -158,21 +158,21 @@ md"""
 """
 
 # ╔═╡ 1e0da8d4-ac61-49d9-8a7b-9485f6961303
-# create AR(p) time series
+# create AR(p) time series - toy model data
 
 begin
-	N = 1000
-	timelags = 2   # = p
+	N = 100
+	timelags = 4   # = p
 	dim = 2
-	A = randn(timelags, dim)
-	A =  [0.887951  -0.755387; -0.121936  -1.00258]
+	A = randn(dim, dim, timelags) * 0.25
+	# A =  [0.887951  -0.755387; -0.121936  -1.00258]
 	Σ = rand(dim, dim)
 	Σ = (Σ + Σ')/2 + I
 	ϵ = MvNormal(zeros(dim), Σ)
 	Y = zeros(N, dim)
 	Y[1:timelags, :] = rand(timelags, dim)
 	for i = (timelags+1):N
-		Y[i, :] = sum(A.*Y[i-timelags:i-1, :], dims=1) + rand(ϵ)'
+		Y[i, :] = sum([A[:,:,j] * Y[i-j, :] for j = 1:timelags])' + rand(ϵ)'
 	end
 end
 
@@ -182,10 +182,11 @@ end
 @model AR_process(x, p) = begin
 	ns, nd = size(x)
 	Σ ~ InverseWishart(nd*2, Matrix(1.0I, nd, nd))    # noise covariance matrix
-	beta ~ Product(Uniform.(-ones((p+1) * nd), ones((p+1) * nd)))   # linear model parameters
-	beta = reshape(beta, (p+1, nd))   # get the parameters in the right matrix shape
-    for t in (p+1):ns
-		μ = vec(beta[1, :] + sum(beta[2:end, :] .* x[t-p:t-1, :], dims=1)')
+	beta ~ Product(Uniform.(-ones((p) * nd^2), ones((p) * nd^2)))   # linear model parameters
+	beta = reshape(beta, (nd, nd, p))   # parameters into matrix shape
+	beta0 ~ Product(Uniform.(-ones(nd), ones(nd)))
+    for t = (p+1):ns
+		μ = vec(beta0 + sum([beta[:, :, i] * x[t-i, :] for i = 1:p]))
         x[t, :] ~ MvNormal(μ, Σ)
     end
 end
@@ -200,10 +201,26 @@ chain = sample(AR_process(Y, 2), NUTS(0.65), 1000)
 chain[end]
 
 # ╔═╡ 6a1c7425-36ff-405e-932a-09c30cb1f7c3
-Σ
+begin
+	dt = 1
+	f_min = 1/min(128, N*dt)
+	f_max = 1/max(8, 2*dt)
+	freqs = range(f_min, f_max, length=2)
+	w = 2pi * freqs * dt;
 
-# ╔═╡ e513e510-fbe7-4615-92aa-2dbaf7b29c5b
-eig(A)
+	H = zeros(Complex, length(w), dim, dim)
+	P = zeros(Complex, length(w), dim, dim)
+	for i = 1:length(w)
+		af_tmp = I
+		for k = 1:timelags
+			@show af_tmp
+			af_tmp = af_tmp + A[:,:,k] * exp(-im * k * w[i])
+		end
+		iaf_tmp = inv(af_tmp)
+		H[i,:,:] = iaf_tmp
+		P[i,:,:] = iaf_tmp * Σ * iaf_tmp'
+	end
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1599,6 +1616,5 @@ version = "0.9.1+5"
 # ╠═b56828ee-87c8-4d29-be86-1fcab3c69b03
 # ╠═0f6168bd-0645-4ef6-abbb-fe387451aa81
 # ╠═6a1c7425-36ff-405e-932a-09c30cb1f7c3
-# ╠═e513e510-fbe7-4615-92aa-2dbaf7b29c5b
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
