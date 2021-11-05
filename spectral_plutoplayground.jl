@@ -32,6 +32,13 @@ begin
 	using LinearAlgebra: I, Matrix
 end
 
+# ╔═╡ 8ffbd97a-0dee-4094-9f30-0f1ed5a5ab7f
+begin
+	using MAT
+	vars = matread("spectralDCM_demodata.mat")
+	Y_mat = vars["Y"]
+end
+
 # ╔═╡ 5ba41742-b91e-4487-8262-1c37a0e06e43
 function psd(x, Δt)
 	n = length(x)
@@ -200,20 +207,30 @@ chain = sample(AR_process(Y, 2), NUTS(0.65), 1000)
 # ╔═╡ 0f6168bd-0645-4ef6-abbb-fe387451aa81
 chain[end]
 
+# ╔═╡ f1e6dcf8-dc41-4c88-a4c6-c80e00dc7d07
+begin
+	chain_mat = sample(AR_process(Y_mat, 3), NUTS(0.65), 500)
+end
+
+# ╔═╡ 10e44b01-0fa9-4e9c-9f8f-aea41e2573e7
+chain_mat[end]
+
 # ╔═╡ 6a1c7425-36ff-405e-932a-09c30cb1f7c3
 begin
-	dt = 1
+	dt = 2
 	f_min = 1/min(128, N*dt)
 	f_max = 1/max(8, 2*dt)
-	freqs = range(f_min, f_max, length=2)
+	freqs = range(f_min, f_max, length=32)
 	w = 2pi * freqs * dt;
+end
 
+# ╔═╡ 316b3399-65a7-476b-b421-74048f4c6bde
+begin
 	H = zeros(Complex, length(w), dim, dim)
 	P = zeros(Complex, length(w), dim, dim)
 	for i = 1:length(w)
 		af_tmp = I
 		for k = 1:timelags
-			@show af_tmp
 			af_tmp = af_tmp + A[:,:,k] * exp(-im * k * w[i])
 		end
 		iaf_tmp = inv(af_tmp)
@@ -222,12 +239,24 @@ begin
 	end
 end
 
+# ╔═╡ 6171ffb2-255d-4494-87d7-08322f35bf48
+foo = rand(2,2)
+
+# ╔═╡ 6c54cdf4-0d75-4cb4-8c2c-bc91be0ef76d
+bar = foo + im*I
+
+# ╔═╡ 655c4731-ad1f-45cf-ae5d-50fcb430347e
+g_MAR = zeros(Complex, size(Y)[)
+csd!(g_MAR, x, y)
+
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MAT = "23992714-dd62-5051-b70f-ba57cb901cac"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
@@ -237,6 +266,7 @@ Turing = "fce5fe82-541a-59a6-adf8-730c64b5f9a0"
 [compat]
 Distributions = "~0.25.22"
 FFTW = "~1.4.3"
+MAT = "~0.10.1"
 Plots = "~1.21.3"
 PlutoUI = "~0.7.9"
 StatsBase = "~0.33.10"
@@ -349,6 +379,24 @@ git-tree-sha1 = "369af32fcb9be65d496dc43ad0bb713705d4e859"
 uuid = "76274a88-744f-5084-9051-94815aaf08c4"
 version = "0.9.11"
 
+[[Blosc]]
+deps = ["Blosc_jll"]
+git-tree-sha1 = "84cf7d0f8fd46ca6f1b3e0305b4b4a37afe50fd6"
+uuid = "a74b3585-a348-5f62-a45c-50e91977d574"
+version = "0.7.0"
+
+[[Blosc_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Lz4_jll", "Pkg", "Zlib_jll", "Zstd_jll"]
+git-tree-sha1 = "e747dac84f39c62aff6956651ec359686490134e"
+uuid = "0b7ba130-8d10-5ba8-a3d6-c5182647fed9"
+version = "1.21.0+0"
+
+[[BufferedStreams]]
+deps = ["Compat", "Test"]
+git-tree-sha1 = "5d55b9486590fdda5905c275bb21ce1f0754020f"
+uuid = "e1450e63-4bb3-523b-b2a4-4ffa8c0fd77d"
+version = "1.0.0"
+
 [[Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "19a35467a82e236ff51bc17a3a44b69ef35185a2"
@@ -372,6 +420,12 @@ deps = ["Compat", "LinearAlgebra", "SparseArrays"]
 git-tree-sha1 = "3533f5a691e60601fe60c90d8bc47a27aa2907ec"
 uuid = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 version = "1.11.0"
+
+[[CodecZlib]]
+deps = ["TranscodingStreams", "Zlib_jll"]
+git-tree-sha1 = "ded953804d019afa9a3f98981d99b33e3db7b6da"
+uuid = "944b1d66-785c-5afd-91f1-9de20f533193"
+version = "0.7.0"
 
 [[ColorSchemes]]
 deps = ["ColorTypes", "Colors", "FixedPointNumbers", "Random"]
@@ -664,6 +718,18 @@ git-tree-sha1 = "53bb909d1151e57e2484c3d1b53e19552b887fb2"
 uuid = "42e2da0e-8278-4e71-bc24-59509adca0fe"
 version = "1.0.2"
 
+[[HDF5]]
+deps = ["Blosc", "Compat", "HDF5_jll", "Libdl", "Mmap", "Random", "Requires"]
+git-tree-sha1 = "698c099c6613d7b7f151832868728f426abe698b"
+uuid = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+version = "0.15.7"
+
+[[HDF5_jll]]
+deps = ["Artifacts", "JLLWrappers", "LibCURL_jll", "Libdl", "OpenSSL_jll", "Pkg", "Zlib_jll"]
+git-tree-sha1 = "fd83fa0bde42e01952757f01149dd968c06c4dba"
+uuid = "0234f1f7-429e-5d53-9886-15a909be8d59"
+version = "1.12.0+1"
+
 [[HTTP]]
 deps = ["Base64", "Dates", "IniFile", "Logging", "MbedTLS", "NetworkOptions", "Sockets", "URIs"]
 git-tree-sha1 = "60ed5f1643927479f845b0135bb369b031b541fa"
@@ -900,6 +966,18 @@ deps = ["Dates", "Logging"]
 git-tree-sha1 = "dfeda1c1130990428720de0024d4516b1902ce98"
 uuid = "e6f89c97-d47a-5376-807f-9c37f3926c36"
 version = "0.4.7"
+
+[[Lz4_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "5d494bc6e85c4c9b626ee0cab05daa4085486ab1"
+uuid = "5ced341a-0733-55b8-9ab6-a4889d929147"
+version = "1.9.3+0"
+
+[[MAT]]
+deps = ["BufferedStreams", "CodecZlib", "HDF5", "SparseArrays"]
+git-tree-sha1 = "5c62992f3d46b8dce69bdd234279bb5a369db7d5"
+uuid = "23992714-dd62-5051-b70f-ba57cb901cac"
+version = "0.10.1"
 
 [[MCMCChains]]
 deps = ["AbstractMCMC", "AxisArrays", "Compat", "Dates", "Distributions", "Formatting", "IteratorInterfaceExtensions", "KernelDensity", "LinearAlgebra", "MCMCDiagnosticTools", "MLJModelInterface", "NaturalSort", "OrderedCollections", "PrettyTables", "Random", "RecipesBase", "Serialization", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "TableTraits", "Tables"]
@@ -1336,6 +1414,12 @@ git-tree-sha1 = "bf4adf36062afc921f251af4db58f06235504eff"
 uuid = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
 version = "0.2.16"
 
+[[TranscodingStreams]]
+deps = ["Random", "Test"]
+git-tree-sha1 = "216b95ea110b5972db65aa90f88d8d89dcb8851c"
+uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
+version = "0.9.6"
+
 [[Transducers]]
 deps = ["Adapt", "ArgCheck", "BangBang", "Baselet", "CompositionsBase", "DefineSingletons", "Distributed", "InitialValues", "Logging", "Markdown", "MicroCollections", "Requires", "Setfield", "SplittablesBase", "Tables"]
 git-tree-sha1 = "bccb153150744d476a6a8d4facf5299325d5a442"
@@ -1615,6 +1699,13 @@ version = "0.9.1+5"
 # ╠═608e6376-48af-4533-b7ae-87ba6d7a3f72
 # ╠═b56828ee-87c8-4d29-be86-1fcab3c69b03
 # ╠═0f6168bd-0645-4ef6-abbb-fe387451aa81
+# ╠═8ffbd97a-0dee-4094-9f30-0f1ed5a5ab7f
+# ╠═f1e6dcf8-dc41-4c88-a4c6-c80e00dc7d07
+# ╠═10e44b01-0fa9-4e9c-9f8f-aea41e2573e7
 # ╠═6a1c7425-36ff-405e-932a-09c30cb1f7c3
+# ╠═316b3399-65a7-476b-b421-74048f4c6bde
+# ╠═6171ffb2-255d-4494-87d7-08322f35bf48
+# ╠═6c54cdf4-0d75-4cb4-8c2c-bc91be0ef76d
+# ╠═655c4731-ad1f-45cf-ae5d-50fcb430347e
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

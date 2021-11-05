@@ -78,8 +78,8 @@ function fx_int(f!, x, t, θ)
 end
 
 μθ = [10.0, 28.0, 8/3]     # parameter
-x0 = [1., 1., 1.]           # initial condition
-dt = 0.0001                 # temporal resolution
+x0 = [1., 1., 1.]          # initial condition
+dt = 0.0001                # temporal resolution
 
 # redefine to an unary function (https://juliadiff.org/ForwardDiff.jl/stable/user/limitations/)
 f_θ = θ -> fx_int(f!, x0, dt, θ)
@@ -127,7 +127,7 @@ end
 d = λ - λE
 dFdh = dFdh - iΣ_λ*d;
 dFdhh = dFdhh - iΣ_λ
-Σ_λ = inv(-dFdhh)    # why is there a minus here??
+Σ_λ = inv(-dFdhh)
 
 dλ = -inv(dFdhdh) * dFdh    # Gauss-Newton step, transform into Levenberg-Marquardt, see MATLAB code
 dλ = min(max(dλ,-1),1)      # probably precaution for numerical errors?
