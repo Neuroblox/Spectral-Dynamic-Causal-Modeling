@@ -111,8 +111,8 @@ function boldsignal(x, lnϵ)
     k3  = 1 - ϵ;
 
     # -Output equation of BOLD signal model
-    ν   = exp(x[:,4])
-    q   = exp(x[:,5])
+    ν   = exp.(x[:,4])
+    q   = exp.(x[:,5])
     bold = V0*(k1 .- k1*q .+ k2 .- k2*q./ν .+ k3 .- k3*ν)
 
     J[4nd+1:5nd,2nd+1:3nd] = diagm(-V0*(k3*ν .- k2*q./ν))
