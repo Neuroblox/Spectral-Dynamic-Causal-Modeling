@@ -1,6 +1,8 @@
 using ModelingToolkit, OrdinaryDiffEq, Plots
 using ForwardDiff: jacobian
 using LinearAlgebra
+using FFTW
+using ToeplitzMatrices
 
 # https://juliapackages.com/p/modelingtoolkit
 # https://mtk.sciml.ai/stable/systems/ODESystem/
@@ -160,10 +162,8 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     V = var["v"]
     Λ = var["s"]
     dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]
-    showless(dgdv)
     dvdu  = pinv(V)*dfdu
-    @show round.(dfdu, digits=4)
-    @show round.(dvdu, digits=4)
+
     nw = size(w,1)            # number of frequencies
     ng = size(dgdx,1)         # number of outputs
     nu = size(dfdu,2)         # number of inputs
@@ -180,6 +180,66 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
         end
     end
     return S
+end
+
+function csd2mar(csd, w, dt, p)
+    dw = w[2] - w[1]
+    w = w/dw
+    ns = dt^-1
+    N = ceil(Int64, ns/2/dw)
+    gj = findall(x -> x > 0 && x < (N + 1), w)
+    gi = gj .+ (ceil(Int64, w[1]) - 1)    # TODO: figure out what's the purpose of this!
+    g = zeros(ComplexF64, N)
+
+    # transform to cross-correlation function
+    ccf = zeros(ComplexF64, N*2+1, size(csd,2), size(csd,3))
+    for i = 1:size(csd, 2)
+        for j = 1:size(csd, 3)
+            g[gi] = csd[gj,i,j]
+            f = ifft(g)
+            f = ifft(vcat([0.0im; g; conj(g[end:-1:1])]))
+            ccf[:,i,j] = real.(fftshift(f))*N*dw
+        end
+    end
+    # MAR coeficients
+
+    N = size(ccf,1)
+    m = size(ccf,2)
+    n = (N - 1) ÷ 2
+    p = min(p, n - 1)
+    ccf = ccf[(1:n) .+ n,:,:]
+    A = zeros(m*p, m)
+    B = zeros(m*p, m*p)
+    for i = 1:m
+        for j = 1:m
+            A[((i-1)*p+1):i*p, j] = ccf[(1:p) .+ 1, i, j]
+            B[((i-1)*p+1):i*p, ((j-1)*p+1):j*p] = SymmetricToeplitz(ccf[1:p, i, j])
+        end
+    end
+    a = B\A
+    @show size(a)
+    noise_cov  = ccf[1,:,:] - A'*a
+    lags = [-a[i:p:m*p, :] for i = 1:p]
+    return (lags, noise_cov)
+end
+
+function mar2csd(lags, noise_cov, p, freqs)
+    dim = size(noise_cov, 1)
+    sf = 2*freqs[end]
+    w  = 2*pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz?
+    nf = length(w)
+	csd = zeros(ComplexF64, nf, dim, dim)
+	for i = 1:nf
+		af_tmp = I
+		for k = 1:p
+			af_tmp = af_tmp + lags[k] * exp(-im * k * w[i])
+		end
+		iaf_tmp = inv(af_tmp)
+		csd[i,:,:] = iaf_tmp * noise_cov * iaf_tmp'     # is this really the covariance or rather precision?!
+	end
+    showless(csd[:,1,1])
+    csd = 2*csd/sf
+    return csd
 end
 
 function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
@@ -216,7 +276,7 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     S = transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
 
     # predicted cross-spectral density
-    G = zeros(Complex,nw,nd,nd);
+    G = zeros(ComplexF64,nw,nd,nd);
     for i = 1:nw
         G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
     end
@@ -237,6 +297,8 @@ Y_mat = vars["Y"]
 y_csd = vars["csd"]
 w = vec(vars["M"]["Hz"])
 θμ = vars["M"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
+p = 7
+dt  = 1/(2*w[end])
 θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
 α = [0, 0]
 β = [0, 0]
@@ -248,7 +310,8 @@ x = zeros(3, 5)
 
 G = csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
 showless = x -> @show round.(x, digits=4)
-
+lags, noise_cov = csd2mar(G, w, dt, p)
+y = mar2csd(lags, noise_cov, p,w)
 ##### Nonlinear System #####
 
 # define Lorenz system 
