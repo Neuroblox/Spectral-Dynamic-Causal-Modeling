@@ -1,6 +1,7 @@
-using ModelingToolkit, OrdinaryDiffEq, Plots
+using OrdinaryDiffEq, Plots
 using ForwardDiff: jacobian
 using LinearAlgebra
+#using MKL
 using FFTW
 using ToeplitzMatrices
 
@@ -144,7 +145,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     dfdu = [diagm(C); 
             zeros(size(J,1), length(C))]
 
-    F = eigen(J_tot, sortby=nothing, permute=false, scale=false)
+    F = eigen(J_tot)   #  , sortby=nothing, permute=false, scale=false)
     Λ = F.values
     V = F.vectors
 
@@ -157,10 +158,10 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
 
     # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
     #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
-    g, dgdx = boldsignal(x, lnϵ)
-    var = matread("../matlabspectrum.mat")
-    V = var["v"]
-    Λ = var["s"]
+    dgdx = boldsignal(x, lnϵ)[2]
+    # var = matread("../matlabspectrum.mat")
+    # V = var["v"]
+    # Λ = var["s"]
     dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]
     dvdu  = pinv(V)*dfdu
 
@@ -217,7 +218,7 @@ function csd2mar(csd, w, dt, p)
         end
     end
     a = B\A
-    @show size(a)
+
     noise_cov  = ccf[1,:,:] - A'*a
     lags = [-a[i:p:m*p, :] for i = 1:p]
     return (lags, noise_cov)
@@ -237,7 +238,6 @@ function mar2csd(lags, noise_cov, p, freqs)
 		iaf_tmp = inv(af_tmp)
 		csd[i,:,:] = iaf_tmp * noise_cov * iaf_tmp'     # is this really the covariance or rather precision?!
 	end
-    showless(csd[:,1,1])
     csd = 2*csd/sf
     return csd
 end
@@ -291,27 +291,49 @@ end
 f(x,A,t) = A*x
 
 using MAT
-J_test =matread("../eig-test.mat")
+showless = x -> @show round.(x, digits=4)
+# J_test =matread("../eig-test.mat")
 vars = matread("spectralDCM_demodata.mat")
 Y_mat = vars["Y"]
 y_csd = vars["csd"]
 w = vec(vars["M"]["Hz"])
 θμ = vars["M"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
-p = 7
-dt  = 1/(2*w[end])
+dim = size(θμ, 1)
+p = 8
 θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
-α = [0, 0]
-β = [0, 0]
-γ = [0, 0, 0]
-C = ones(size(θμ, 1))
-lnϵ = 0                       # BOLD signal parameter
-lndecay, lntransit = [0,0]    # hemodynamic parameters
-x = zeros(3, 5)
+α = [0.0, 0.0]
+β = [0.0, 0.0]
+γ = [0.0, 0.0, 0.0]
+C = ones(Float64, dim)
+lnϵ = 0.0                       # BOLD signal parameter
+lndecay, lntransit = [0.0, 0.0]    # hemodynamic parameters
+x = zeros(Float64, 3, 5)
 
-G = csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
-showless = x -> @show round.(x, digits=4)
-lags, noise_cov = csd2mar(G, w, dt, p)
-y = mar2csd(lags, noise_cov, p,w)
+param = [reshape(θμ, dim^2); C; α; β; γ; lnϵ; lndecay; lntransit]
+
+function csd_fmri_mtf(x, w, p, param)
+    dim = size(x, 1)
+    θμ = reshape(param[1:dim^2], dim, dim)
+    C = param[(1+dim^2):(dim^2+dim)]
+    α = param[(1+dim^2+dim):(2+dim^2+dim)]
+    β = param[(3+dim^2+dim):(4+dim^2+dim)]
+    γ = param[(5+dim^2+dim):(7+dim^2+dim)]
+    lnϵ = param[8+dim^2+dim]
+    lndecay = param[9+dim^2+dim]
+    lntransit = param[10+dim^2+dim]
+    G = csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
+    dt  = 1/(2*w[end])
+    lags, noise_cov = csd2mar(G, w, dt, p-1)
+    y = mar2csd(lags, noise_cov, p-1, w)
+    return y
+end
+
+f_prep = foo -> csd_fmri_mtf(x, w, p, [foo;param[dim+1:end]])
+y = f_prep(param[1:dim])
+bar = param[1:dim]
+J = jacobian(f_prep, bar)
+
+
 ##### Nonlinear System #####
 
 # define Lorenz system 
