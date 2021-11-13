@@ -48,13 +48,13 @@ function hemodynamics!(dx, x, na, decay, transit)
 
     # implement differential state equation f = dx/dt (hemodynamic)
 
-    dx[:, 1] = na .- κ.*x[:, 1] .- H[2]*(x[:, 2] .- 1)   # Corresponds to eq (9)
-    dx[:, 2] = x[:, 1]./x[:, 2]  # Corresponds to eq (10), note the added logarithm (see doc string)
-    dx[:, 3] = (x[:, 2] .- fv)./(τ.*x[:, 3])    # Corresponds to eq (8), note the added logarithm (see doc string)
-    dx[:, 4] = (ff.*x[:, 2] .- fv.*x[:, 4]./x[:, 3])./(τ.*x[:, 4])  # Corresponds to eq (8), note the added logarithm (see doc string)
+    # dx[:, 1] = na .- κ.*x[:, 1] .- H[2]*(x[:, 2] .- 1)   # Corresponds to eq (9)
+    # dx[:, 2] = x[:, 1]./x[:, 2]  # Corresponds to eq (10), note the added logarithm (see doc string)
+    # dx[:, 3] = (x[:, 2] .- fv)./(τ.*x[:, 3])    # Corresponds to eq (8), note the added logarithm (see doc string)
+    # dx[:, 4] = (ff.*x[:, 2] .- fv.*x[:, 4]./x[:, 3])./(τ.*x[:, 4])  # Corresponds to eq (8), note the added logarithm (see doc string)
 
     d = size(x)[1]   # number of dimensions, equals typically number of regions
-    J = zeros(4d, 4d)
+    J = zeros(Real, 4d, 4d)
 
     J[1:d,1:d] = Matrix(-κ*I, d, d)     # TODO: make it work when κ is a vector. Only solution if-clause? diagm doesn't allow scalars, [κ] would work in that case
     J[1:d,d+1:2d] = diagm(-H[2]*x[:,2])
@@ -131,190 +131,21 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # J_x = jacobian(f, x0) # well, no need to perform this for a linear system... we already have it: θμ
     C /= 16.0   # TODO: unclear why it is devided by 16 but see spm_fx_fmri.m:49
     # 2. get jacobian of hemodynamics
-    dx = similar(x[:, 2:end])
-    J = hemodynamics!(dx, x[:, 2:end], x[:, 1], lndecay, lntransit)[2]
-    nd = size(θμ, 1)
-    J_tot = [θμ zeros(nd, size(J, 2));   # add derivatives w.r.t. neural signal
-             [Matrix(1.0I, size(θμ)); zeros(size(J)[1]-nd, size(θμ)[2])] J]
 
-    dfdu = [diagm(C); 
-            zeros(size(J,1), length(C))]
-
-    F = eigen(J_tot)   #  , sortby=nothing, permute=false, scale=false)
-    Λ = F.values
-    V = F.vectors
-
-    # condition unstable eigenmodes
-    # if max(w) > 1
-    #     s = 1j*imag(s) + real(s) - exp(real(s));
-    # else
-    #     s = 1j*imag(s) + min(real(s),-1/32);
-    # end
-
-    # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
-    #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
-    dgdx = boldsignal(x, lnϵ)[2]
-    # var = matread("../matlabspectrum.mat")
-    # V = var["v"]
-    # Λ = var["s"]
-    dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]
-    dvdu  = pinv(V)*dfdu
-
-    nw = size(w,1)            # number of frequencies
-    ng = size(dgdx,1)         # number of outputs
-    nu = size(dfdu,2)         # number of inputs
-    nk = size(V,2)            # number of modes
-    S = zeros(Complex, nw, ng, nu)
-
-    for j = 1:nu
-        for i = 1:ng
-            for k = 1:nk
-                # transfer functions (FFT of kernel)
-                Sk = (1im*2*pi*w .- Λ[k]).^-1
-                S[:,i,j] .+= dgdv[i,k]*dvdu[k,j]*Sk
-            end
-        end
-    end
-    return S
+	@show typeof(θμ)
+    F = eigen(θμ)   #  , sortby=nothing, permute=false, scale=false)
+	@show typeof(F)
+    return F.values
 end
 
-function csd2mar(csd, w, dt, p)
-    dw = w[2] - w[1]
-    w = w/dw
-    ns = dt^-1
-    N = ceil(Int64, ns/2/dw)
-    gj = findall(x -> x > 0 && x < (N + 1), w)
-    gi = gj .+ (ceil(Int64, w[1]) - 1)    # TODO: figure out what's the purpose of this!
-    g = zeros(ComplexF64, N)
-
-    # transform to cross-correlation function
-    ccf = zeros(ComplexF64, N*2+1, size(csd,2), size(csd,3))
-    for i = 1:size(csd, 2)
-        for j = 1:size(csd, 3)
-            g[gi] = csd[gj,i,j]
-            f = ifft(g)
-            f = ifft(vcat([0.0im; g; conj(g[end:-1:1])]))
-            ccf[:,i,j] = real.(fftshift(f))*N*dw
-        end
-    end
-    # MAR coeficients
-
-    N = size(ccf,1)
-    m = size(ccf,2)
-    n = (N - 1) ÷ 2
-    p = min(p, n - 1)
-    ccf = ccf[(1:n) .+ n,:,:]
-    A = zeros(m*p, m)
-    B = zeros(m*p, m*p)
-    for i = 1:m
-        for j = 1:m
-            A[((i-1)*p+1):i*p, j] = ccf[(1:p) .+ 1, i, j]
-            B[((i-1)*p+1):i*p, ((j-1)*p+1):j*p] = SymmetricToeplitz(ccf[1:p, i, j])
-        end
-    end
-    a = B\A
-
-    noise_cov  = ccf[1,:,:] - A'*a
-    lags = [-a[i:p:m*p, :] for i = 1:p]
-    return (lags, noise_cov)
-end
-
-function mar2csd(lags, noise_cov, p, freqs)
-    dim = size(noise_cov, 1)
-    sf = 2*freqs[end]
-    w  = 2*pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz?
-    nf = length(w)
-	csd = zeros(ComplexF64, nf, dim, dim)
-	for i = 1:nf
-		af_tmp = I
-		for k = 1:p
-			af_tmp = af_tmp + lags[k] * exp(-im * k * w[i])
-		end
-		iaf_tmp = inv(af_tmp)
-		csd[i,:,:] = iaf_tmp * noise_cov * iaf_tmp'     # is this really the covariance or rather precision?!
-	end
-    csd = 2*csd/sf
-    return csd
-end
-
-function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
-    # priors of spectral parameters
-    # ln(α) and ln(β), region specific fluctuations: ln(γ)
-    nw = length(w)
-    nd = size(θμ, 1)
-
-    # define function that implements spectra given in equation (2) of "A DCM for resting state fMRI".
-
-    # neuronal fluctuations (Gu) (1/f or AR(1) form)
-    Gu = zeros(nw, nd, nd)
-    Gn = zeros(nw, nd, nd)
-    G = w.^(-exp(β[1]))   # spectrum of hidden dynamics
-    G /= sum(G)
-    for i = 1:nd
-        Gu[:, i, i] .+= exp(α[1])*G
-    end
-    # region specific observation noise (1/f or AR(1) form)
-    G = w.^(-exp(β[2])/2)
-    G /= sum(G)
-    for i = 1:nd
-        Gn[:,i,i] .+= exp(γ[i])*G
-    end
-
-    # global components
-    for i = 1:nd
-        for j = i:nd
-            Gn[:,i,j] .+= exp(α[2])*G
-            Gn[:,j,i] = Gn[:,i,j]
-        end
-    end
-
-    S = transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
-
-    # predicted cross-spectral density
-    G = zeros(ComplexF64,nw,nd,nd);
-    for i = 1:nw
-        G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
-    end
-
-    return G + Gn
-end
-
-using MAT
-vars = matread("spectralDCM_demodata.mat")
-y_csd = vars["csd"]
-w = vec(vars["M"]["Hz"])
-θμ = vars["M"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
+w = rand(32)
+θμ = randn(3,3)
 dim = size(θμ, 1)
-p = 8
-θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
-α = [0.0, 0.0]
-β = [0.0, 0.0]
-γ = [0.0, 0.0, 0.0]
 C = ones(Float64, dim)
 lnϵ = 0.0                       # BOLD signal parameter
 lndecay, lntransit = [0.0, 0.0]    # hemodynamic parameters
 x = zeros(Float64, 3, 5)
 
 
-function csd_fmri_mtf(x, w, p, param)
-    dim = size(x, 1)
-    θμ = reshape(param[1:dim^2], dim, dim)
-    C = param[(1+dim^2):(dim^2+dim)]
-    α = param[(1+dim^2+dim):(2+dim^2+dim)]
-    β = param[(3+dim^2+dim):(4+dim^2+dim)]
-    γ = param[(5+dim^2+dim):(7+dim^2+dim)]
-    lnϵ = param[8+dim^2+dim]
-    lndecay = param[9+dim^2+dim]
-    lntransit = param[10+dim^2+dim]
-    G = csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
-    dt  = 1/(2*w[end])
-    lags, noise_cov = csd2mar(G, w, dt, p-1)
-    y = mar2csd(lags, noise_cov, p-1, w)
-    return y
-end
-
-param = [reshape(θμ, dim^2); C; α; β; γ; lnϵ; lndecay; lntransit]
-
-f_prep = param -> csd_fmri_mtf(x, w, p, param)
-y = f_prep(param)    # test function to see if it gives right result.
-J = jacobian(f_prep, param)
+testfun = foo -> transferfunction(x, w, foo, C, lnϵ, lndecay, lntransit)
+J_test = jacobian(testfun, θμ)
