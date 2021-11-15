@@ -1,5 +1,5 @@
 using OrdinaryDiffEq, Plots
-using ForwardDiff: jacobian
+using ForwardDiff: jacobian, Dual
 using LinearAlgebra
 #using MKL
 using FFTW
@@ -138,12 +138,14 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # 2. get jacobian of hemodynamics
     dx = similar(x[:, 2:end])
     J = hemodynamics!(dx, x[:, 2:end], x[:, 1], lndecay, lntransit)[2]
+    θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
+    # if I eventually need also the change of variables rather than just the derivative then here is where to fix it!
     nd = size(θμ, 1)
     J_tot = [θμ zeros(nd, size(J, 2));   # add derivatives w.r.t. neural signal
              [Matrix(1.0I, size(θμ)); zeros(size(J)[1]-nd, size(θμ)[2])] J]
 
-    dfdu = [diagm(C); 
-            zeros(size(J,1), length(C))]
+    dfdu = [C; 
+            zeros(size(J,1), size(C, 2))]
 
     F = eigen(J_tot)   #  , sortby=nothing, permute=false, scale=false)
     Λ = F.values
@@ -272,7 +274,7 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
             Gn[:,j,i] = Gn[:,i,j]
         end
     end
-
+    C = Matrix(I, nd, nd)
     S = transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
 
     # predicted cross-spectral density
@@ -288,7 +290,7 @@ end
 # A  = @SMatrix [-0.5 -0.2  0.0
 #                0.4 -0.5 -0.3
 #                0.0  0.2 -0.5]
-f(x,A,t) = A*x
+# f(x,A,t) = A*x
 
 using MAT
 showless = x -> @show round.(x, digits=4)
@@ -298,17 +300,24 @@ Y_mat = vars["Y"]
 y_csd = vars["csd"]
 w = vec(vars["M"]["Hz"])
 θμ = vars["M"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
+pΠ = vars["M"]["pC"]
+idx = findall(x -> x != 0, pΠ)
+U = zeros(size(pΠ, 1), length(idx))
+for i = 1:length(idx)
+    U[idx[i][1], i] = 1.0
+end
+
+
 dim = size(θμ, 1)
+C = zeros(Float64, dim)  # besides, whatever C one defines here it will be replaced in csd_approx
 p = 8
-θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
 α = [0.0, 0.0]
 β = [0.0, 0.0]
-γ = [0.0, 0.0, 0.0]
-C = ones(Float64, dim)
-lnϵ = 0.0                       # BOLD signal parameter
-lndecay, lntransit = [0.0, 0.0]    # hemodynamic parameters
+γ = zeros(Float64, dim)
+lnϵ = 0.0                        # BOLD signal parameter
+lndecay = 0.0                    # hemodynamic parameter
+lntransit = zeros(Float64, dim)  # hemodynamic parameters
 x = zeros(Float64, 3, 5)
-
 param = [reshape(θμ, dim^2); C; α; β; γ; lnϵ; lndecay; lntransit]
 
 function csd_fmri_mtf(x, w, p, param)
@@ -328,10 +337,23 @@ function csd_fmri_mtf(x, w, p, param)
     return y
 end
 
-f_prep = foo -> csd_fmri_mtf(x, w, p, [foo;param[dim+1:end]])
-y = f_prep(param[1:dim])
-bar = param[1:dim]
-J = jacobian(f_prep, bar)
+function diff(U, dx, f, param)
+    nJ = size(U, 2)
+    y0 = f(param)
+    J = zeros(ComplexF64, nJ, size(y0, 1), size(y0, 2), size(y0, 3))
+    for i = 1:nJ
+        tmp_param = param .+ U[:, i]*dx
+        y1 = f(tmp_param)
+        J[i,:,:,:] = (y1 .- y0)/dx
+    end
+    return J
+end
+
+dx = exp(-8)
+f_prep = param -> csd_fmri_mtf(x, w, p, param)
+J = diff(U, dx, f_prep, param);
+
+# J = jacobian(f_prep, param)
 
 
 ##### Nonlinear System #####
