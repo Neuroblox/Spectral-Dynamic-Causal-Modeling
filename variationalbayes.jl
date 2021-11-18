@@ -125,7 +125,7 @@ for i = 1:nh
 end
 
 d = λ - λE
-dFdh = dFdh - iΣ_λ*d;
+dFdh = dFdh - iΣ_λ*d
 dFdhh = dFdhh - iΣ_λ
 Σ_λ = inv(-dFdhh)
 

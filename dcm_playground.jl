@@ -1,9 +1,10 @@
-using OrdinaryDiffEq, Plots
-using ForwardDiff: jacobian, Dual
+# using OrdinaryDiffEq, Plots
+using ForwardDiff: jacobian
 using LinearAlgebra
 #using MKL
 using FFTW
 using ToeplitzMatrices
+using MAT
 
 # https://juliapackages.com/p/modelingtoolkit
 # https://mtk.sciml.ai/stable/systems/ODESystem/
@@ -286,40 +287,6 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     return G + Gn
 end
 
-# using StaticArrays
-# A  = @SMatrix [-0.5 -0.2  0.0
-#                0.4 -0.5 -0.3
-#                0.0  0.2 -0.5]
-# f(x,A,t) = A*x
-
-using MAT
-showless = x -> @show round.(x, digits=4)
-# J_test =matread("../eig-test.mat")
-vars = matread("spectralDCM_demodata.mat")
-Y_mat = vars["Y"]
-y_csd = vars["csd"]
-w = vec(vars["M"]["Hz"])
-θμ = vars["M"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
-pΠ = vars["M"]["pC"]
-idx = findall(x -> x != 0, pΠ)
-U = zeros(size(pΠ, 1), length(idx))
-for i = 1:length(idx)
-    U[idx[i][1], i] = 1.0
-end
-
-
-dim = size(θμ, 1)
-C = zeros(Float64, dim)  # besides, whatever C one defines here it will be replaced in csd_approx
-p = 8
-α = [0.0, 0.0]
-β = [0.0, 0.0]
-γ = zeros(Float64, dim)
-lnϵ = 0.0                        # BOLD signal parameter
-lndecay = 0.0                    # hemodynamic parameter
-lntransit = zeros(Float64, dim)  # hemodynamic parameters
-x = zeros(Float64, 3, 5)
-param = [reshape(θμ, dim^2); C; α; β; γ; lnϵ; lndecay; lntransit]
-
 function csd_fmri_mtf(x, w, p, param)
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
@@ -349,11 +316,47 @@ function diff(U, dx, f, param)
     return J
 end
 
+
+# using StaticArrays
+# A  = @SMatrix [-0.5 -0.2  0.0
+#                0.4 -0.5 -0.3
+#                0.0  0.2 -0.5]
+# f(x,A,t) = A*x
+
+showless = x -> @show round.(x, digits=4)
+# J_test =matread("../eig-test.mat")
+vars = matread("spectralDCM_demodata.mat")
+Y_mat = vars["Y"]
+y_csd = vars["csd"]
+w = vec(vars["M"]["Hz"])
+θμ = vars["M"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
+pΠ = vars["M"]["pC"]
+idx = findall(x -> x != 0, pΠ)
+U = zeros(size(pΠ, 1), length(idx))
+for i = 1:length(idx)
+    U[idx[i][1], i] = 1.0
+end
+
+
+dim = size(θμ, 1)
+C = zeros(Float64, dim)  # besides, whatever C one defines here it will be replaced in csd_approx
+p = 8
+α = [0.0, 0.0]
+β = [0.0, 0.0]
+γ = zeros(Float64, dim)
+lnϵ = 0.0                        # BOLD signal parameter
+lndecay = 0.0                    # hemodynamic parameter
+lntransit = zeros(Float64, dim)  # hemodynamic parameters
+x = zeros(Float64, 3, 5)
+param = [reshape(θμ, dim^2); C; α; β; γ; lnϵ; lndecay; lntransit]
+
+
 dx = exp(-8)
 f_prep = param -> csd_fmri_mtf(x, w, p, param)
 J = diff(U, dx, f_prep, param);
 
-# J = jacobian(f_prep, param)
+
+
 
 
 ##### Nonlinear System #####
