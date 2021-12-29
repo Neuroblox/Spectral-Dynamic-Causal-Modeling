@@ -331,27 +331,28 @@ function csd_Q(csd)
     return Q
 end
 
-regionlist = 2:10
-times = zeros(length(regionlist), 2)
-using BenchmarkTools
+# regionlist = 2:10
+# times = zeros(length(regionlist), 2)
+# using BenchmarkTools
 
-for i = regionlist
-    vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/data_speedtest/n" * string(i) * ".mat");
-    y_csd = vars["csd_tmp"];
-    t = @benchmark csd_Q($y_csd);
-    times[i-regionlist[1]+1, 1] = mean(t.times)*10^-9
-    times[i-regionlist[1]+1, 2] = vars["t_matlab"]
-end
+# for i = regionlist
+#     vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/data_speedtest/n" * string(i) * ".mat");
+#     y_csd = vars["csd_tmp"];
+#     t = @benchmark csd_Q($y_csd);
+#     times[i-regionlist[1]+1, 1] = mean(t.times)*10^-9
+#     times[i-regionlist[1]+1, 2] = vars["t_matlab"]
+# end
 
-
-plot(regionlist, times[:,2]./times[:,1], label="", 
-    ylabel="speed-up factor", xlabel="number of regions",
-    thickness_scaling = 1.2)
-scatter!(regionlist, times[:,2]./times[:,1], label="")
-savefig("speedup_over_regions_mean.png")
+# plot(regionlist, times[:,2]./times[:,1], label="", 
+#     ylabel="speed-up factor", xlabel="number of regions",
+#     thickness_scaling = 1.2)
+# scatter!(regionlist, times[:,2]./times[:,1], label="")
+# savefig("speedup_over_regions_mean.png")
 
 vars = matread("spectralDCM_demodata.mat")
-
+M = matread("../eig-test.mat")["J"]
+v,s = eigen(M)
+showless(v)
 Y_mat = vars["Y"]
 y_csd = vars["csd"]
 w = vec(vars["M"]["Hz"])

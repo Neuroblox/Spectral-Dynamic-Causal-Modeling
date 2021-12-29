@@ -164,6 +164,21 @@ md"""
 ## CSD based on Bayesian auto-regressive models
 """
 
+# ╔═╡ 1e86e136-1528-4edc-af6f-cb9328af2a9f
+# define AR(p) model
+
+@model AR_process(x, p) = begin
+	ns, nd = size(x)
+	Σ ~ InverseWishart(nd*2, Matrix(1.0I, nd, nd))    # noise covariance matrix
+	beta ~ Product(Uniform.(-ones((p) * nd^2), ones((p) * nd^2)))   # linear model parameters
+	beta = reshape(beta, (nd, nd, p))   # parameters into matrix shape
+	beta0 ~ Product(Uniform.(-ones(nd), ones(nd)))
+    for t = (p+1):ns
+		μ = vec(beta0 + sum([beta[:, :, i] * x[t-i, :] for i = 1:p]))
+        x[t, :] ~ MvNormal(μ, Σ)
+    end
+end
+
 # ╔═╡ 1e0da8d4-ac61-49d9-8a7b-9485f6961303
 # create AR(p) time series - toy model data
 
@@ -181,21 +196,6 @@ begin
 	for i = (timelags+1):N
 		Y[i, :] = sum([A[:,:,j] * Y[i-j, :] for j = 1:timelags])' + rand(ϵ)'
 	end
-end
-
-# ╔═╡ 1e86e136-1528-4edc-af6f-cb9328af2a9f
-# define AR(p) model
-
-@model AR_process(x, p) = begin
-	ns, nd = size(x)
-	Σ ~ InverseWishart(nd*2, Matrix(1.0I, nd, nd))    # noise covariance matrix
-	beta ~ Product(Uniform.(-ones((p) * nd^2), ones((p) * nd^2)))   # linear model parameters
-	beta = reshape(beta, (nd, nd, p))   # parameters into matrix shape
-	beta0 ~ Product(Uniform.(-ones(nd), ones(nd)))
-    for t = (p+1):ns
-		μ = vec(beta0 + sum([beta[:, :, i] * x[t-i, :] for i = 1:p]))
-        x[t, :] ~ MvNormal(μ, Σ)
-    end
 end
 
 # ╔═╡ 608e6376-48af-4533-b7ae-87ba6d7a3f72
@@ -673,9 +673,9 @@ uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 
 [[GLFW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Pkg", "Xorg_libXcursor_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll"]
-git-tree-sha1 = "dba1e8614e98949abfa60480b13653813d8f0157"
+git-tree-sha1 = "0c603255764a1fa0b61752d2bec14cfbd18f7fe8"
 uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
-version = "3.3.5+0"
+version = "3.3.5+1"
 
 [[GR]]
 deps = ["Base64", "DelimitedFiles", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Printf", "Random", "Serialization", "Sockets", "Test", "UUIDs"]
