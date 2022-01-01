@@ -4,7 +4,8 @@ using FFTW
 using ToeplitzMatrices
 using MAT
 using Plots
-showless = x -> @show round.(x, digits=4)
+using Serialization
+
 
 
 function hemodynamics!(dx, x, na, decay, transit)
@@ -42,7 +43,7 @@ function hemodynamics!(dx, x, na, decay, transit)
     κ = H[1]*exp(decay)
 
     # transit time
-    τ = H[3]*exp(transit)
+    τ = H[3]*exp.(transit)
 
     # Fout = f(v) - outflow
     fv = x[:, 2].^(H[4]^-1)
@@ -69,7 +70,7 @@ function hemodynamics!(dx, x, na, decay, transit)
     J[3d+1:4d,d+1:2d] = diagm((x[:,2] .+ log(1 - H[5])*(1 - H[5]).^(x[:,2].^-1) .- x[:,2].*(1 - H[5]).^(x[:,2].^-1))./(τ.*x[:,4]*H[5]))
     J[3d+1:4d,2d+1:3d] = diagm((x[:,3].^(H[4]^-1 - 1)*(H[4] - 1))./(τ*H[4]))
     J[3d+1:4d,3d+1:4d] = diagm((x[:,2]./x[:,4]).*((1 - H[5]).^(x[:,2].^-1) .- 1)./(τ*H[5]))
-        
+
     return (dx, J)
 end
 
@@ -146,7 +147,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     dfdu = [C; 
             zeros(size(J,1), size(C, 2))]
 
-    F = eigen(J_tot)   #  , sortby=nothing, permute=false, scale=false)
+    F = eigen(J_tot, sortby=nothing, permute=true)
     Λ = F.values
     V = F.vectors
 
@@ -163,8 +164,14 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # var = matread("../matlabspectrum.mat")
     # V = var["v"]
     # Λ = var["s"]
-    dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]
+    dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
     dvdu  = pinv(V)*dfdu
+    # vars = matread("tmp8.mat")
+    # print(dgdx, vars["dgdx"], "\n")
+    # dvdu_mat = vars["dvdu"]
+    # print("Bold: ", dvdu ≈ dvdu_mat)
+    # dfdx_mat = vars["dfdx"]
+    # print(" hemo: ", dfdx_mat ≈ J_tot, "\n")
 
     nw = size(w,1)            # number of frequencies
     ng = size(dgdx,1)         # number of outputs
@@ -185,6 +192,11 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
 end
 
 function csd2mar(csd, w, dt, p)
+    # TODO: investiagate why SymmetricToeplitz(ccf[1:p, i, j]) is not good to be used but instead need to use Toeplitz(ccf[1:p, i, j], ccf[1:p, j, i])
+    # as is done in the original MATLAB code (confront comment there). ccf should be a symmetric matrix so there should be no difference between the
+    # Toeplitz matrices but for the second jacobian (J[2], see for loop for i = 1:nJ in function diff) the computation produces subtle differences between
+    # the two versions.
+
     dw = w[2] - w[1]
     w = w/dw
     ns = dt^-1
@@ -203,19 +215,21 @@ function csd2mar(csd, w, dt, p)
             ccf[:,i,j] = real.(fftshift(f))*N*dw
         end
     end
-    # MAR coeficients
 
+    # MAR coefficients
     N = size(ccf,1)
     m = size(ccf,2)
     n = (N - 1) ÷ 2
     p = min(p, n - 1)
     ccf = ccf[(1:n) .+ n,:,:]
+    ccf_mat = matread("tmp5.mat")["ccf"]
+    print("is ccf still correct? ", ccf ≈ ccf_mat, "\n")
     A = zeros(m*p, m)
     B = zeros(m*p, m*p)
     for i = 1:m
         for j = 1:m
             A[((i-1)*p+1):i*p, j] = ccf[(1:p) .+ 1, i, j]
-            B[((i-1)*p+1):i*p, ((j-1)*p+1):j*p] = SymmetricToeplitz(ccf[1:p, i, j])
+            B[((i-1)*p+1):i*p, ((j-1)*p+1):j*p] = Toeplitz(ccf[1:p, i, j], vcat(ccf[1,i,j], ccf[2:p, j, i]))  # SymmetricToeplitz(ccf[1:p, i, j])
         end
     end
     a = B\A
@@ -288,17 +302,31 @@ end
 function csd_fmri_mtf(x, w, p, param)
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
-    C = param[(1+dim^2):(dim^2+dim)]
-    α = param[(1+dim^2+dim):(2+dim^2+dim)]
-    β = param[(3+dim^2+dim):(4+dim^2+dim)]
-    γ = param[(5+dim^2+dim):(7+dim^2+dim)]
-    lnϵ = param[8+dim^2+dim]
-    lndecay = param[9+dim^2+dim]
-    lntransit = param[10+dim^2+dim]
+    C = param[(1+dim^2):(3+dim^2)]
+    lntransit = param[(4+dim^2):(6+dim^2)]
+    lndecay = param[7+dim^2]
+    lnϵ = param[8+dim^2]
+    α[1] = param[9+dim^2]
+    β[1] = param[10+dim^2]
+    α[2] = param[11+dim^2]
+    β[2] = param[12+dim^2]
+    γ = param[(13+dim^2):(15+dim^2)]
     G = csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
+    # serialize("G_Toeplitztest.dat", G)
     dt  = 1/(2*w[end])
     lags, noise_cov = csd2mar(G, w, dt, p-1)
+    # lags_mat = matread("tmp2.mat")["mar"]
+    # for i = 1:length(lags)
+    #     print(lags[i] ≈ lags_mat["lag"]["a"][i])
+    #     if i == 1
+    #         print(lags[i],"\n")
+    #         print(lags_mat["lag"]["a"][i])
+    #     end
+    # end
+    # print("\n\n")
     y = mar2csd(lags, noise_cov, p-1, w)
+    y_mat = matread("tmp9.mat")["y"]
+    print("final: ", y ≈ y_mat, "\n")
     return y
 end
 
@@ -307,7 +335,9 @@ function diff(U, dx, f, param)
     y0 = f(param)
     J = zeros(ComplexF64, nJ, size(y0, 1), size(y0, 2), size(y0, 3))
     for i = 1:nJ
+        print("\n", "round: ", i, "\n")
         tmp_param = param .+ U[:, i]*dx
+        print(tmp_param, "\n")
         y1 = f(tmp_param)
         J[i,:,:,:] = (y1 .- y0)/dx
     end
@@ -349,17 +379,16 @@ end
 # scatter!(regionlist, times[:,2]./times[:,1], label="")
 # savefig("speedup_over_regions_mean.png")
 
-vars = matread("spectralDCM_demodata.mat")
-M = matread("../eig-test.mat")["J"]
-v,s = eigen(M)
-showless(v)
-Y_mat = vars["Y"]
+vars = matread("spectralDCM_demodata_notsparse.mat")
+# Y_mat = vars["Y"]
 y_csd = vars["csd"]
-w = vec(vars["M"]["Hz"])
-θμ = vars["M"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
-pΠ = vars["M"]["pC"]
+w = vec(vars["M_nosparse"]["Hz"])
+θμ = vars["M_nosparse"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
+pΠ = vars["M_nosparse"]["pC"]
 idx = findall(x -> x != 0, pΠ)
 U = zeros(size(pΠ, 1), length(idx))
+order = sortperm(pΠ[idx], rev=true)
+idx = idx[order]
 for i = 1:length(idx)
     U[idx[i][1], i] = 1.0
 end
@@ -375,10 +404,18 @@ lnϵ = 0.0                        # BOLD signal parameter
 lndecay = 0.0                    # hemodynamic parameter
 lntransit = zeros(Float64, dim)  # hemodynamic parameters
 x = zeros(Float64, 3, 5)
-param = [reshape(θμ, dim^2); C; α; β; γ; lnϵ; lndecay; lntransit]
+param = [reshape(θμ, dim^2); C; lntransit; lndecay; lnϵ; α[1]; β[1]; α[2]; β[2]; γ;]
+# Strange α and β sorting? yes. This is to be consistent with the SPM12 code while keeping nomenclature consistent with the spectral DCM paper
 
 
 dx = exp(-8)
 f_prep = param -> csd_fmri_mtf(x, w, p, param)
+
+
 J = diff(U, dx, f_prep, param);
 
+vars = matread("diff_result.mat")
+J_mat = vars["dfdp"]
+for i = 1:length(J_mat)
+    print(J_mat[i] ≈ J[i,:,:,:], "\n")
+end

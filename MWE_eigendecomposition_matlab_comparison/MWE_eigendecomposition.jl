@@ -16,8 +16,8 @@ v_matb, s_matb = tmp["v"], tmp["s"]
 tmp = matread("MWE_eigendecomposition_matlab_comparison/eigenvals_eigenvecs_nobalance.mat")
 v_mat, s_mat = tmp["v"], tmp["s"]
 s, v = eigen(M, permute=true, scale=false, sortby=nothing)
-s ≈ s_mat
-v ≈ v_mat
+s ≈ s_matb
+v ≈ v_matb
 showless([s_mat s])
 showless(v)
 showless(v_mat)
