@@ -166,12 +166,6 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # Λ = var["s"]
     dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
     dvdu  = pinv(V)*dfdu
-    # vars = matread("tmp8.mat")
-    # print(dgdx, vars["dgdx"], "\n")
-    # dvdu_mat = vars["dvdu"]
-    # print("Bold: ", dvdu ≈ dvdu_mat)
-    # dfdx_mat = vars["dfdx"]
-    # print(" hemo: ", dfdx_mat ≈ J_tot, "\n")
 
     nw = size(w,1)            # number of frequencies
     ng = size(dgdx,1)         # number of outputs
@@ -222,8 +216,6 @@ function csd2mar(csd, w, dt, p)
     n = (N - 1) ÷ 2
     p = min(p, n - 1)
     ccf = ccf[(1:n) .+ n,:,:]
-    ccf_mat = matread("tmp5.mat")["ccf"]
-    print("is ccf still correct? ", ccf ≈ ccf_mat, "\n")
     A = zeros(m*p, m)
     B = zeros(m*p, m*p)
     for i = 1:m
@@ -315,18 +307,7 @@ function csd_fmri_mtf(x, w, p, param)
     # serialize("G_Toeplitztest.dat", G)
     dt  = 1/(2*w[end])
     lags, noise_cov = csd2mar(G, w, dt, p-1)
-    # lags_mat = matread("tmp2.mat")["mar"]
-    # for i = 1:length(lags)
-    #     print(lags[i] ≈ lags_mat["lag"]["a"][i])
-    #     if i == 1
-    #         print(lags[i],"\n")
-    #         print(lags_mat["lag"]["a"][i])
-    #     end
-    # end
-    # print("\n\n")
     y = mar2csd(lags, noise_cov, p-1, w)
-    y_mat = matread("tmp9.mat")["y"]
-    print("final: ", y ≈ y_mat, "\n")
     return y
 end
 
@@ -335,9 +316,7 @@ function diff(U, dx, f, param)
     y0 = f(param)
     J = zeros(ComplexF64, nJ, size(y0, 1), size(y0, 2), size(y0, 3))
     for i = 1:nJ
-        print("\n", "round: ", i, "\n")
         tmp_param = param .+ U[:, i]*dx
-        print(tmp_param, "\n")
         y1 = f(tmp_param)
         J[i,:,:,:] = (y1 .- y0)/dx
     end
@@ -361,6 +340,23 @@ function csd_Q(csd)
     return Q
 end
 
+# regionlist = 2:10
+# times = zeros(length(regionlist), 2)
+# using BenchmarkTools
+
+# for i = regionlist
+#     vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/data_speedtest/n" * string(i) * ".mat");
+#     y_csd = vars["csd_tmp"];
+#     t = @benchmark csd_Q($y_csd);
+#     times[i-regionlist[1]+1, 1] = mean(t.times)*10^-9
+#     times[i-regionlist[1]+1, 2] = vars["t_matlab"]
+# end
+
+# plot(regionlist, times[:,2]./times[:,1], label="", 
+#     ylabel="speed-up factor", xlabel="number of regions",
+#     thickness_scaling = 1.2)
+# scatter!(regionlist, times[:,2]./times[:,1], label="")
+# savefig("speedup_over_regions_mean.png")
 
 vars = matread("spectralDCM_demodata_notsparse.mat")
 # Y_mat = vars["Y"]
@@ -397,3 +393,8 @@ f_prep = param -> csd_fmri_mtf(x, w, p, param)
 
 J = diff(U, dx, f_prep, param);
 
+vars = matread("diff_result.mat")
+J_mat = vars["dfdp"]
+for i = 1:length(J_mat)
+    print(J_mat[i] ≈ J[i,:,:,:], "\n")
+end
