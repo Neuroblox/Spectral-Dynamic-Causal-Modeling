@@ -45,7 +45,7 @@ pC, Cp = θΣ, Σθ   # prior covariance of parameters (q(θ))
 hE, Eh = λμ, μλ   # prior expectation of hyperparameters (q(λ))
 hC, Ch = λΣ, Σλ   # prior covariance of hyperparameters (q(λ))
 
-Σ, iΣ  # data covariance matrix (likelihood), and its inverse (precision of likelihood)
+Σ, iΣ  # data covariance matrix (likelihood), and its inverse (precision of likelihood - use Π only for those precisions that don't change)
 Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 =#
 

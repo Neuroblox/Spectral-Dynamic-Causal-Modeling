@@ -166,12 +166,6 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # Λ = var["s"]
     dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
     dvdu  = pinv(V)*dfdu
-    # vars = matread("tmp8.mat")
-    # print(dgdx, vars["dgdx"], "\n")
-    # dvdu_mat = vars["dvdu"]
-    # print("Bold: ", dvdu ≈ dvdu_mat)
-    # dfdx_mat = vars["dfdx"]
-    # print(" hemo: ", dfdx_mat ≈ J_tot, "\n")
 
     nw = size(w,1)            # number of frequencies
     ng = size(dgdx,1)         # number of outputs
@@ -222,8 +216,6 @@ function csd2mar(csd, w, dt, p)
     n = (N - 1) ÷ 2
     p = min(p, n - 1)
     ccf = ccf[(1:n) .+ n,:,:]
-    ccf_mat = matread("tmp5.mat")["ccf"]
-    print("is ccf still correct? ", ccf ≈ ccf_mat, "\n")
     A = zeros(m*p, m)
     B = zeros(m*p, m*p)
     for i = 1:m
@@ -312,21 +304,9 @@ function csd_fmri_mtf(x, w, p, param)
     β[2] = param[12+dim^2]
     γ = param[(13+dim^2):(15+dim^2)]
     G = csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
-    # serialize("G_Toeplitztest.dat", G)
     dt  = 1/(2*w[end])
     lags, noise_cov = csd2mar(G, w, dt, p-1)
-    # lags_mat = matread("tmp2.mat")["mar"]
-    # for i = 1:length(lags)
-    #     print(lags[i] ≈ lags_mat["lag"]["a"][i])
-    #     if i == 1
-    #         print(lags[i],"\n")
-    #         print(lags_mat["lag"]["a"][i])
-    #     end
-    # end
-    # print("\n\n")
     y = mar2csd(lags, noise_cov, p-1, w)
-    y_mat = matread("tmp9.mat")["y"]
-    print("final: ", y ≈ y_mat, "\n")
     return y
 end
 
@@ -335,13 +315,11 @@ function diff(U, dx, f, param)
     y0 = f(param)
     J = zeros(ComplexF64, nJ, size(y0, 1), size(y0, 2), size(y0, 3))
     for i = 1:nJ
-        print("\n", "round: ", i, "\n")
         tmp_param = param .+ U[:, i]*dx
-        print(tmp_param, "\n")
         y1 = f(tmp_param)
         J[i,:,:,:] = (y1 .- y0)/dx
     end
-    return J
+    return J, y0
 end
 
 function csd_Q(csd)
@@ -357,28 +335,45 @@ function csd_Q(csd)
         end
     end
     norm_matlab = maximum(vec(sum(abs.(Q),dims=2)))
-    Q = inv(Q .+ norm_matlab/32*Matrix(I, size(Q)))   # MATLAB's and Julia's norm function are different!
+    Q = inv(Q .+ norm_matlab/32*Matrix(I, size(Q)))   # TODO: MATLAB's and Julia's norm function are different! Reconceliate?
     return Q
 end
 
+
+### DEFINE SEVERAL VARIABLES AND PRIORS TO GET STARTED ###
 
 vars = matread("spectralDCM_demodata_notsparse.mat")
 # Y_mat = vars["Y"]
 y_csd = vars["csd"]
 w = vec(vars["M_nosparse"]["Hz"])
 θμ = vars["M_nosparse"]["pE"]["A"]    # see table 1 in friston2014 for values of priors 
-pΠ = vars["M_nosparse"]["pC"]
-idx = findall(x -> x != 0, pΠ)
-U = zeros(size(pΠ, 1), length(idx))
-order = sortperm(pΠ[idx], rev=true)
+θΣ = vars["M_nosparse"]["pC"]
+λE = vars["M_nosparse"]["hE"]
+Πλ_p = vars["M_nosparse"]["ihC"]
+np = length(θμ)            # number of parameters
+ny = length(y_csd)         # total number of response variables
+ns = size(y_csd, 1)        # number of samples
+nr = ny÷ns                 # number of response components
+nq = 1
+Q = zeros(ny,ny,nr)
+for i = 1:nr
+    Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
+end
+nh = size(Q,3)             # number of precision components (this is the same as above, but may differ)
+λ = 8 * ones(nh)
+
+idx = findall(x -> x != 0, θΣ)
+V = zeros(size(θΣ, 1), length(idx))
+order = sortperm(θΣ[idx], rev=true)
 idx = idx[order]
 for i = 1:length(idx)
-    U[idx[i][1], i] = 1.0
+    V[idx[i][1], i] = 1.0
 end
-
+θΣ = V'*θΣ*V
+Πθ_p = inv(θΣ)
 
 dim = size(θμ, 1)
-C = zeros(Float64, dim)  # besides, whatever C one defines here it will be replaced in csd_approx
+C = zeros(Float64, dim)    # NB: whatever C is defined to be here, it will be replaced in csd_approx. A little strange thing of SPM12
 p = 8
 α = [0.0, 0.0]
 β = [0.0, 0.0]
@@ -390,10 +385,74 @@ x = zeros(Float64, 3, 5)
 param = [reshape(θμ, dim^2); C; lntransit; lndecay; lnϵ; α[1]; β[1]; α[2]; β[2]; γ;]
 # Strange α and β sorting? yes. This is to be consistent with the SPM12 code while keeping nomenclature consistent with the spectral DCM paper
 
-
 dx = exp(-8)
 f_prep = param -> csd_fmri_mtf(x, w, p, param)
 
 
-J = diff(U, dx, f_prep, param);
+
+dfdp, f = diff(V, dx, f_prep, param);
+# TODO: SPM12 has a stability check here, we omit it for now.
+
+e = reshape(y_csd - f, ny)   # error value
+J = - transpose(reshape(dfdp, 19, ny))      # Jacobian, unclear why we have a minus sign. Helmut: comes from deriving a Gaussian. 
+
+
+## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
+local iΣ
+for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
+    iΣ = zeros(ny, ny)
+    for i = 1:nh
+        iΣ = iΣ .+ Q[:,:,i]*exp(λ[i])
+    end
+
+    Σ = inv(iΣ)        # Julia requires conversion to dense matrix before inversion so just use dense from the get-go
+    Pp = zeros(ComplexF64, size(Πθ_p))
+    mul!(Pp, J', iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
+    Pp = real(Pp)
+    Σθ = inv(Pp + Πθ_p)
+
+    P = similar(Q)
+    PΣ = similar(Q)
+    JPJ = zeros(size(Pp,1), size(Pp,2), size(Q,3))
+    for i = 1:nh
+        P[:,:,i] = Q[:,:,i]*exp(λ[i])
+        PΣ[:,:,i] = P[:,:,i] * Σ
+        JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above), what's the rational?
+    end
+
+    dFdh = zeros(nh)
+    dFdhh = zeros(nh, nh)
+    for i = 1:nh
+        dFdh[i] = (tr(PΣ[:,:,i])*nq - real(e'*P[:,:,i]*e) - tr(Σθ * JPJ[:,:,i]))/2
+        for j = i:nh
+            dFdhh[i, j] = - tr(PΣ[:,:,i] * PΣ[:,:,j])*nq/2
+            dFdhh[j, i] = dFdhh[i, j]
+        end
+    end
+
+    d = λ - λE
+    dFdh = dFdh - Πλ_p*d
+    dFdhh = dFdhh - Πλ_p
+    Σλ = inv(-dFdhh)
+
+    dλ = -inv(dFdhh) * dFdh    # Gauss-Newton step, transform into Levenberg-Marquardt, see MATLAB code
+    dλ = [min(max(x,-1.0),1.0) for x in dλ]      # probably precaution for numerical instabilities?
+    λ = λ + dλ
+
+    dF = dot(dFdh,dλ)
+    print(dF,"\n")
+    # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
+    # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
+    # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
+    if dF < 1e-2
+        break
+    end
+end
+
+## E-Step with Levenberg-Marquardt regularization // comment from MATLAB code
+L = zeros(3)
+L[1] = (log(det(iΣ))*nq  - real(e'*iΣ*e) - ny*log(2pi))/2    # Numerical overflow!
+L[2] = (log(det(iΣ_θ * Σ_θ)) - transpose(p) * iΣ_θ *p)/2
+L[3] = (log(det(ihC*Ch)) - transpose(d) * iΣ_λ * d)/2;
+F = sum(L);
 
