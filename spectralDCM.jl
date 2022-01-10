@@ -1,4 +1,4 @@
-using ForwardDiff: jacobian
+# using ForwardDiff: jacobian
 using LinearAlgebra
 using FFTW
 using ToeplitzMatrices
@@ -10,8 +10,8 @@ using Serialization
 
 function hemodynamics!(dx, x, na, decay, transit)
     """
+    na     - neural activity
     Components of x are:
-    na     - neural activity: x
     x[:,1] - vascular signal: s
     x[:,2] - rCBF: ln(f)
     x[:,3] - venous volume: ln(ν)
@@ -61,7 +61,7 @@ function hemodynamics!(dx, x, na, decay, transit)
     d = size(x)[1]   # number of dimensions, equals typically number of regions
     J = zeros(4d, 4d)
 
-    J[1:d,1:d] = Matrix(-κ*I, d, d)     # TODO: make it work when κ is a vector. Only solution if-clause? diagm doesn't allow scalars, [κ] would work in that case
+    J[1:d,1:d] = Matrix(-κ*I, d, d)   # TODO: make it work when κ/decay is a vector. Only solution if-clause? diagm doesn't allow scalars, [κ] would work in that case
     J[1:d,d+1:2d] = diagm(-H[2]*x[:,2])
     J[d+1:2d,1:d] = diagm( x[:,2].^-1)
     J[d+1:2d,d+1:2d] = diagm(-x[:,1]./x[:,2])
@@ -335,7 +335,7 @@ function csd_Q(csd)
         end
     end
     norm_matlab = maximum(vec(sum(abs.(Q),dims=2)))
-    Q = inv(Q .+ norm_matlab/32*Matrix(I, size(Q)))   # TODO: MATLAB's and Julia's norm function are different! Reconceliate?
+    Q = inv(Q .+ norm_matlab/32*Matrix(I, size(Q)))   # TODO: MATLAB's and Julia's norm function are different! Reconciliate?
     return Q
 end
 
@@ -398,12 +398,14 @@ J = - transpose(reshape(dfdp, 19, ny))      # Jacobian, unclear why we have a mi
 
 
 ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
-local iΣ
+iΣ = zeros(ny, ny)  # local iΣ
+ϵ_λ = zeros(np)
 for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
-    iΣ = zeros(ny, ny)
+    tmp = zeros(ny, ny)
     for i = 1:nh
-        iΣ = iΣ .+ Q[:,:,i]*exp(λ[i])
+        tmp = tmp .+ Q[:,:,i]*exp(λ[i])
     end
+    iΣ = tmp
 
     Σ = inv(iΣ)        # Julia requires conversion to dense matrix before inversion so just use dense from the get-go
     Pp = zeros(ComplexF64, size(Πθ_p))
@@ -430,8 +432,8 @@ for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
         end
     end
 
-    d = λ - λE
-    dFdh = dFdh - Πλ_p*d
+    ϵ_λ = λ - λE
+    dFdh = dFdh - Πλ_p*ϵ_λ
     dFdhh = dFdhh - Πλ_p
     Σλ = inv(-dFdhh)
 
@@ -451,8 +453,7 @@ end
 
 ## E-Step with Levenberg-Marquardt regularization // comment from MATLAB code
 L = zeros(3)
-L[1] = (log(det(iΣ))*nq  - real(e'*iΣ*e) - ny*log(2pi))/2    # Numerical overflow!
-L[2] = (log(det(iΣ_θ * Σ_θ)) - transpose(p) * iΣ_θ *p)/2
-L[3] = (log(det(ihC*Ch)) - transpose(d) * iΣ_λ * d)/2;
+L[1] = (logdet(iΣ)*nq  - real(e'*iΣ*e) - ny*log(2pi))/2   # figure out why dot gives a different result here (dot(e',iΣ,e))
+L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ', Πθ_p, ϵ_θ))/2
+L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ', Πλ_p, ϵ_λ))/2;
 F = sum(L);
-
