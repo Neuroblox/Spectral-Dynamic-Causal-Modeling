@@ -393,7 +393,8 @@ function spm_logdet(M)
     return sum(log.(s))
 end
 
-function VariationalBayesStep(x, y, w, V, param, priors)
+
+function VariationalBayesStep(x, y, w, V, param, priors, niter)
     # extract priors
     Πθ_p = priors[1]
     Πλ_p = priors[2]
@@ -423,10 +424,12 @@ function VariationalBayesStep(x, y, w, V, param, priors)
 
     # state variable
     F = -Inf
-    state = Dict("F"=>F, "ϵ_θ" => zeros(np), "λ" => λ)
+    F0 = F
+    state = Dict("F"=>F, "ϵ_θ" => zeros(np), "λ" => λ, "μθ" => μθ, "Σθ" => inv(Πθ_p))
     v = -4   # log ascent rate
-    
-    for k = 1:1
+    criterion = [false, false, false, false]
+
+    for k = 1:niter
 
         dfdp, f = diff(V, dx, f_prep, μθ);
         norm_dfdp = matlab_norm(dfdp, Inf);
@@ -511,7 +514,6 @@ function VariationalBayesStep(x, y, w, V, param, priors)
             λ = λ + dλ
 
             dF = dot(dFdh,dλ)
-            print(dF,"\n")
             # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
             # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
             # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
@@ -527,11 +529,17 @@ function VariationalBayesStep(x, y, w, V, param, priors)
         L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ', Πλ_p, ϵ_λ))/2;
         F = sum(L);
 
+        if k == 1
+            F0 = F
+        end
+
         if F > state["F"] || k < 3
             # accept current state
             state["F"] = F
             state["ϵ_θ"] = ϵ_θ
             state["λ"] = λ
+            state["Σθ"] = Σθ
+            state["μθ"] = μθ
             # Conditional update of gradients and curvature
             dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ   # check sign!!
             dFdpp = -real(J' * iΣ * J) - Πθ_p
@@ -555,8 +563,18 @@ function VariationalBayesStep(x, y, w, V, param, priors)
         end
         ϵ_θ += dθ
         μθ = θμ + V*ϵ_θ
+        dF  = dot(dFdp, ϵ_θ);
+
+        # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times
+        print("iteration: ", k, " - F:", state["F"] - F0, " - dF predicted:", dF, "\n")
+        criterion = vcat(dF < 1e-1, criterion[1:end - 1]);
+        if all(criterion)
+            print("convergence\n")
+            break
+        end
     end
-    return F
+    print("iterations terminated\n")
+    return state
 end
 
-VariationalBayesStep(x, y_csd, w, V, param, priors)
+results = VariationalBayesStep(x, y_csd, w, V, param, priors, 100)
