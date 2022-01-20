@@ -63,9 +63,11 @@ function add_noise(du,u,p,t)
   return sig;
   end
   
-  ysim = g_sigmoid.(ar,slope,scale)
+
+
+  ysim = g_sigmoid.(ar,slope,scale) #this is the data to be fed to the model
   
-  ns = rand(Normal(0,1),2,size(ar,2),size(ar,3))
+  ns = rand(Normal(0,1),2,size(ar,2),size(ar,3)) #this is the measurement noise
 
   t = [i for i = 0:0.1:50]
 
