@@ -149,7 +149,7 @@ function add_noise(du,u,p,t)
 
   pl2
   
-  Random.seed!(99)
+  Random.seed!(91)
 
   advi = ADVI(30, 1000)
   
