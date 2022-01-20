@@ -17,9 +17,9 @@ using Plots
 using Turing: Variational
 using DelimitedFiles
 
-Random.seed!(908)
+Random.seed!(08)
 
-function vanderpol(du,u,p,t)
+ function vanderpol(du,u,p,t)
 	x1,x2 = u
 	θ,ϕ = p
 	
@@ -38,22 +38,21 @@ function add_noise(du,u,p,t)
   end
 
   u0 = [0.1, 0.1]
-  tspan = [0.0, 150]
-  p = [2, (0.2)]
+  tspan = [0.0, 50]
+  p = [1, (0.1)]
 
   slope = 5;
+  
   scale = 50;
   
   prob1 = SDEProblem(vanderpol, add_noise, u0, tspan, p)
 
   sol = solve(prob1,SOSRI(),saveat=0.1)
 
-  """
   plot(sol)
 
-  plot(sol, vars = (1,2))
-  """
-
+  #plot(sol, vars = (1,2))
+  
   ensembleprob = EnsembleProblem(prob1)
   @time data = solve(ensembleprob,SOSRI(),EnsembleThreads(),saveat=0.1,trajectories=1)
   #plot(EnsembleSummary(data))
@@ -68,7 +67,7 @@ function add_noise(du,u,p,t)
   
   ns = rand(Normal(0,1),2,size(ar,2),size(ar,3))
 
-  t = [i for i = 0:0.1:150]
+  t = [i for i = 0:0.1:50]
 
   #x = readdlm("van_data_x.txt", '\t', Float64,'\n')
   #y = readdlm("van_data_y.txt", '\t', Float64,'\n')
@@ -78,16 +77,19 @@ function add_noise(du,u,p,t)
 
   Turing.setadbackend(:forwarddiff)
 
+  
   @model function fitvp(data,prob1)
     #σ ~ InverseGamma(8,3)
     σ = 1
     #θ ~ Uniform(0,10)
-    θ ~ Normal(0,5)
+    #θ ~ Normal(0,2)
+    θ ~ Gamma(2,5)
     #θ ~ TruncatedNormal(0,1,0,Inf)
-    ϕ ~ Uniform(0,0.5)
+    ϕ ~ Uniform(0,0.2)
+    #ϕ ~ Gamma(1.1,0.1)
+    x01 ~ Normal(0.1,0.1)
     
-    x01 ~ Normal(0.1,1)
-    x02 ~ Normal(0.1,1)
+    x02 ~ Normal(0.1,0.1)
 
     p = [θ,ϕ]
     u0 = [x01,x02]
@@ -132,10 +134,9 @@ function add_noise(du,u,p,t)
   # model = fitvp(sol,prob1)
 
   #chain = sample(model, NUTS(0.25), MCMCThreads(),1000, 1)#,init_theta = [0.1, 0.5, 0.1])
-   chain = sample(model, NUTS(0.45), MCMCThreads(),1000,4)
+   chain = sample(model, NUTS(0.65),2000)
 
-  """
-   plot(chain)
+  plot(chain)
   cr=Array(chain)
 
   pl2= plot(sol,alpha=2,legend=false)
@@ -145,27 +146,29 @@ function add_noise(du,u,p,t)
       resol = solve(remake(prob1,p=cr[rand(1:1000),1:2]),SOSRI(),saveat=0.1)
       plot!(pl2,resol, alpha=0.1, color = "#BBBBBB", legend = false)
   end
- """
+
+  pl2
   
-  Random.seed!(689)
+  Random.seed!(99)
 
   advi = ADVI(30, 1000)
+  
   q = vi(model, advi);
 
   samples=rand(q,10000)
   mn=mean(samples,dims=2)
-  #density(samples[1,:],legend=false,xlims=(0,5))
+  density(samples[1,:],legend=false,xlims=(0,5))
 
-  """
   pl= plot(sol,alpha=2,legend=false)
   for k in 1:300
-    resol = solve(remake(prob1,u0=samples[3:4,rand(1:10000)],p=samples[1:2,rand(1:10000)]),Tsit5(),saveat=0.1)
-    #resol = solve(remake(prob1,p=samples[1:2,rand(1:10000)]),SOSRI(),saveat=0.1)
+    #resol = solve(remake(prob1,u0=samples[3:4,rand(1:10000)],p=samples[1:2,rand(1:10000)]),SOSRI(),saveat=0.1)
+    resol = solve(remake(prob1,p=samples[1:2,rand(1:10000)]),SOSRI(),saveat=0.1)
     
     plot!(pl,resol, alpha=0.1, color = "#BBBBBB", legend = false,ylims=(-5,5))
   end
 pl
 
+"""
 open("samples4.txt","w") do io
 	writedlm(io, samples)
 end
