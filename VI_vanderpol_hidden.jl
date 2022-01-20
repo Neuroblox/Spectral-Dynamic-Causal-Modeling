@@ -167,11 +167,8 @@ function add_noise(du,u,p,t)
     plot!(pl,resol, alpha=0.1, color = "#BBBBBB", legend = false,ylims=(-5,5))
   end
 pl
-
-"""
 open("samples4.txt","w") do io
 	writedlm(io, samples)
 end
 
 samples = readdlm("samples4.txt", '\t', Float64,'\n')
-"""
