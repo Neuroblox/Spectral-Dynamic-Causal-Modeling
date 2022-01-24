@@ -1,11 +1,9 @@
-# using ForwardDiff: jacobian
 using LinearAlgebra
 using FFTW
 using ToeplitzMatrices
 using MAT
-using Plots
-using Serialization
 using ExponentialUtilities
+using Serialization
 
 
 function hemodynamics!(dx, x, na, decay, transit)
@@ -298,10 +296,8 @@ function csd_fmri_mtf(x, w, p, param)
     lntransit = param[(4+dim^2):(6+dim^2)]
     lndecay = param[7+dim^2]
     lnϵ = param[8+dim^2]
-    α[1] = param[9+dim^2]
-    β[1] = param[10+dim^2]
-    α[2] = param[11+dim^2]
-    β[2] = param[12+dim^2]
+    α = param[[9+dim^2, 11+dim^2]]
+    β = param[[10+dim^2, 12+dim^2]]
     γ = param[(13+dim^2):(15+dim^2)]
     G = csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     dt  = 1/(2*w[end])
@@ -352,13 +348,13 @@ end
 
 ### DEFINE SEVERAL VARIABLES AND PRIORS TO GET STARTED ###
 
-vars = matread("spectralDCM_demodata_notsparse.mat")
+vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_demodata_notsparse.mat")
 # Y_mat = vars["Y"]
 y_csd = vars["csd"];
 w = vec(vars["M_nosparse"]["Hz"]);
 A = vars["M_nosparse"]["pE"]["A"];    # see table 1 in friston2014 for values of priors 
 θΣ = vars["M_nosparse"]["pC"];
-λμ = vars["M_nosparse"]["hE"];
+λμ = vec(vars["M_nosparse"]["hE"]);
 Πλ_p = vars["M_nosparse"]["ihC"];
 
 idx = findall(x -> x != 0, θΣ);
@@ -386,19 +382,20 @@ param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; α[1]; β[1]; α[2];
 priors = [Πθ_p, Πλ_p, λμ]
 
 function spm_logdet(M)
+    TOL = 1e-16
     s = diag(M)
     if sum(abs.(s)) != sum(abs.(M[:]))
         ~, s, ~ = svd(M)
     end
-    return sum(log.(s))
+    return sum(log.(s[(s .> TOL) .& (s .< TOL^-1)]))
 end
 
 
-function VariationalBayesStep(x, y, w, V, param, priors, niter)
+function VariationalBayes(x, y, w, V, param, priors, niter)
     # extract priors
     Πθ_p = priors[1]
     Πλ_p = priors[2]
-    λμ = priors[3]
+    λμ = vec(priors[3])
 
     # prep stuff
     p = Int(param[1])
@@ -428,10 +425,16 @@ function VariationalBayesStep(x, y, w, V, param, priors, niter)
     state = Dict("F"=>F, "ϵ_θ" => zeros(np), "λ" => λ, "μθ" => μθ, "Σθ" => inv(Πθ_p))
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
+    Σθ = similar(Πθ_p)
+    Σλ = similar(Πθ_p)
+    iΣ = zeros(ny, ny)
+    ϵ_λ = similar(λμ)
 
     for k = 1:niter
 
         dfdp, f = diff(V, dx, f_prep, μθ);
+        dfdp = transpose(reshape(dfdp, np, ny))
+
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
@@ -439,18 +442,19 @@ function VariationalBayesStep(x, y, w, V, param, priors, niter)
             for i = 1:4
                 # reset expansion point and increase regularization
                 v = min(v - 2,-4);
-                v = exp(v - logdet(dFdpp)/np)
+                t = exp(v - logdet(dFdpp)/np)
 
                 # E-Step: update
-                if v > exp(16)
+                if t > exp(16)
                     ϵ_θ = state["ϵ_θ"] - inv(dFdpp)*dFdp    # -inv(dfdx)*f
                 else
-                    ϵ_θ = state["ϵ_θ"] + expv(v, dFdpp, inv(dFdpp)*dFdp) -inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                    ϵ_θ = state["ϵ_θ"] + expv(t, dFdpp, inv(dFdpp)*dFdp) -inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
                 end
 
                 μθ = θμ + V*ϵ_θ
 
                 dfdp, f = diff(V, dx, f_prep, μθ);
+                dfdp = transpose(reshape(dfdp, np, ny))
 
                 # check for stability
                 norm_dfdp = matlab_norm(dfdp, Inf);
@@ -465,14 +469,10 @@ function VariationalBayesStep(x, y, w, V, param, priors, niter)
 
 
         ϵ = reshape(y - f, ny)                   # error value
-        J = - transpose(reshape(dfdp, np, ny))   # Jacobian, unclear why we have a minus sign. Helmut: comes from deriving a Gaussian. 
+        J = - dfdp   # Jacobian, unclear why we have a minus sign. Helmut: comes from deriving a Gaussian. 
 
 
         ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
-        Σθ = similar(Πθ_p)
-        Σλ = similar(Πθ_p)
-        iΣ = zeros(ny, ny)
-        ϵ_λ = similar(λμ)
         for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
             iΣ = zeros(ny, ny)
             for i = 1:nh
@@ -509,9 +509,21 @@ function VariationalBayesStep(x, y, w, V, param, priors, niter)
             dFdhh = dFdhh - Πλ_p
             Σλ = inv(-dFdhh)
 
-            dλ = -inv(dFdhh) * dFdh    # Gauss-Newton step, transform into Levenberg-Marquardt, see MATLAB code
-            dλ = [min(max(x,-1.0),1.0) for x in dλ]      # probably precaution for numerical instabilities?
+            t = exp(4 - spm_logdet(dFdhh)/length(λ))
+            # E-Step: update
+            if t > exp(16)
+                dλ = -inv(dFdhh) * dFdh
+            else
+                dλ = expv(t, dFdhh, inv(dFdhh)*dFdh) -inv(dFdhh)*dFdh   # (expm(dfdx*t) - I)*inv(dfdx)*f
+            end
+
+            dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
             λ = λ + dλ
+            # print("hyperparam: ", λ ≈ matread(string("dfdp_iter", k, m, ".mat"))["h"], "\n")
+            # print(λ, vec(matread(string("dfdp_iter", k, m, ".mat"))["h"]), "\n")
+            # print("delta param: ", dλ ≈ matread(string("dfdp_iter", k, m, ".mat"))["dh"], "\n")
+            # print(dλ, vec(matread(string("dfdp_iter", k, m, ".mat"))["dh"]), "\n")
+            # print("error:", ϵ_λ ≈ matread(string("dfdp_iter", k, m, ".mat"))["d"], "\n")
 
             dF = dot(dFdh,dλ)
             # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
@@ -525,8 +537,8 @@ function VariationalBayesStep(x, y, w, V, param, priors, niter)
         ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
         L = zeros(3)
         L[1] = (logdet(iΣ)*nq  - real(ϵ'*iΣ*ϵ) - ny*log(2pi))/2   # TODO: figure out why dot gives a different result here (dot(e',iΣ,e))
-        L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ', Πθ_p, ϵ_θ))/2
-        L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ', Πλ_p, ϵ_λ))/2;
+        L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ, Πθ_p, ϵ_θ))/2
+        L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2;
         F = sum(L);
 
         if k == 1
@@ -549,18 +561,21 @@ function VariationalBayesStep(x, y, w, V, param, priors, niter)
             # reset expansion point
             ϵ_θ = state["ϵ_θ"]
             λ = state["λ"]
-            
             # and increase regularization
             v = min(v - 2,-4);
         end
 
         # E-Step: update
-        v = exp(v - spm_logdet(dFdpp)/np)
-        if v > exp(16)
+        t = exp(v - spm_logdet(dFdpp)/np)
+        if t > exp(16)
             dθ = - inv(dFdpp)*dFdp    # -inv(dfdx)*f
         else
-            dθ = expv(v, dFdpp, inv(dFdpp)*dFdp) - inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
+            tmp1 = inv(dFdpp)*dFdp
+            tmp2 = expv(t, dFdpp, tmp1)
+            dθ = tmp2 - inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
+            serialize("/home/david/Projects/neuroblox/codes/Spectral-DCM/corr.dat", (dθ, tmp1, tmp2, dFdpp, t))
         end
+
         ϵ_θ += dθ
         μθ = θμ + V*ϵ_θ
         dF  = dot(dFdp, ϵ_θ);
@@ -574,7 +589,12 @@ function VariationalBayesStep(x, y, w, V, param, priors, niter)
         end
     end
     print("iterations terminated\n")
+    state["F"] = F
+    state["Σθ"] = V*Σθ*V'
+    state["μθ"] = μθ
     return state
 end
 
-results = VariationalBayesStep(x, y_csd, w, V, param, priors, 100)
+
+
+results = VariationalBayes(x, y_csd, w, V, param, priors, 1)
