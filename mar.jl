@@ -1,0 +1,173 @@
+# questions:
+# 1. what is the right approach to use variables outside of for loop that are defined inside it?
+# 2. is it better to divide or do power? ones(rank_X,1)./dx(1:rank_X)
+# 3. Why do we also include the dimensionality here? has something to do with svd?
+
+using LinearAlgebra
+
+function mar(X, p, prior)
+# Bayesian Multivariate Autoregressive Modelling
+# FORMAT [mar,y,y_pred] = spm_mar (X,p,prior,verbose)
+# 
+# Matrix of AR coefficients are in form
+# x_t = -a_1 x_t-1 - a_2 x_t-2 + ...... - a_p x_t-p
+# where a_k is a d-by-d matrix of coefficients at lag k and x_t-k's are 
+# vectors of a d-variate time series.
+# X              T-by-d matrix containing d-variate time series
+# p              Order of MAR model
+# prior          Prior on MAR coefficients (see marprior.m)
+# verbose        1 to print out iteration details, 0 otherwise (default=0)
+# 
+# mar.lag(k).a   AR coefficient matrix at lag k
+# mar.noise_cov  Estimated noise covariance
+# mar.fm         Free energy of model
+# mar.wmean      MAR coefficients stored in a matrix
+# y              Target values
+# y_pred         Predicted values
+# ___________________________________________________________________________
+
+nd = size(X,2);    # dimension of time series
+ns = size(X,1);    # length of time series
+
+# Embedding of multiple time series 
+# giving x=[(x1(t-1) x2(t-1) .. xd(t-1)) (x1(t-2) x2(t-2)..xd(t-2)) ...
+#           (x1(t-p) x2(t-p) .. xd(t-p))] on each row
+
+# TODO: offset is ignored at current, include that additional constant dimension?
+x = zeros(ns-p, nd*p)
+for i = p:-1:1
+    x[:, (p-i)*nd+1:(p-i+1)*nd] = X[i:ns+i-p-1, :]
+end
+
+y = X[p+1:ns,:];   # target variable
+
+k = p*nd^2;
+
+# Get both pseudo-inverse and approx to inv(x'*x) efficiently
+ux, dx, vx = svd(x);
+kk=size(x, 2);
+svd_tol=maximum(dx)*eps()*kk;   # Why do we also include the dimensionality here? has something to do with svd?
+rank_X=sum(dx .> svd_tol);
+dxm=diagm(dx[1:rank_X].^-1);    # is it better to divide or do power? ones(rank_X,1)./dx(1:rank_X)
+dxm2=diagm(dx[1:rank_X].^-2);
+xp=vx[:,1:rank_X]*dxm*ux[:,1:rank_X]';   # Pseudo-inverse
+inv_xtx=vx[:,1:rank_X]*dxm2*vx[:,1:rank_X]';  # approx to inv(x'*x)
+
+# Compute term that will be used many times
+xtx=x'*x;
+
+# Get maximum likelihood solution
+# w_ml = pinv(-1*x)*y;
+w_ml = -xp*y;
+
+# Swap signs to be consistent with paper (swap back at end !)
+w_ml *= -1;
+
+y_pred = x * w_ml;
+e = y - y_pred;
+noise_cov = (e' * e)/(ns-p);
+sigma_ml = kron(noise_cov, inv_xtx);
+
+# Priors on alpha(s)
+b_alpha_prior=1000;
+c_alpha_prior=0.001;
+
+# Initialise 
+w_mean=w_ml;
+w_cov=sigma_ml;
+
+max_iters=32;     # TODO: put this and perhaps other algorithm parameters into the function interface
+w=zeros(p*nd, nd);
+tol=0.0001;
+for it = 1:max_iters
+    
+    # Update weight precisions
+    Ij = diagm(prior);
+    kj = sum(prior);
+    E_wj = 0.5*w_mean[:]'*Ij*w_mean[:];
+    b_alpha = E_wj+0.5*tr(Ij*w_cov*Ij) + (1/b_alpha_prior);
+    b_alpha = 1/b_alpha;
+    c_alpha = 0.5*kj+c_alpha_prior;
+    mean_alpha = b_alpha*c_alpha;
+    E_w = E_wj;
+    
+    yy_pred = x*w_mean;
+    ee = y-yy_pred;
+    E_d_av = ee'*ee;
+    
+    Omega = zeros(nd, nd);
+    # Submatrix size
+    s=p*nd;
+    for i = 1:nd
+        for j = i:nd
+            istart = 1+(i-1)*s;
+            istop = istart+s-1;
+            jstart = 1+(j-1)*s;
+            jstop = jstart+s-1;
+            w_cov_ij = w_cov[istart:istop, jstart:jstop];
+            Omega[i, j] = tr(w_cov_ij*xtx);
+        end
+    end
+    Omega = Omega+Omega'-diagm(diag(Omega));
+
+    E_d_av .+= Omega;
+
+    # Update noise precision posterior
+    B = E_d_av;
+    a = ns;
+    mean_lambda = a*inv(B);
+
+    prior_cov = zeros(k, k);
+    Ij = diagm(prior);
+    prior_cov = prior_cov .+ (1/mean_alpha)*Ij;
+
+    # Convergence criterion
+    old_w=w;
+    w=w_mean;
+
+    if it <= 2
+        w=w_mean;
+    else
+        change = norm(w[:] - old_w[:])/k;
+        if change < tol
+            break;
+        end
+    end;
+
+    # Update weight posterior
+    data_precision = kron(mean_lambda, xtx);
+    prior_prec = zeros(k, k);
+
+    Ij = diagm(prior);
+    prior_prec = prior_prec+mean_alpha*Ij;
+
+    w_cov = inv(data_precision + prior_prec);
+    vec_w_mean = w_cov*data_precision*w_ml[:];
+    w_mean = reshape(vec_w_mean, p*nd, nd);
+end
+
+
+# Load up returning data structure
+mar = Dict()
+mar["p"] = p;
+
+# This is the ML estimate
+mar["noise_cov"] = noise_cov;
+mar["a_ml"] = w_ml;
+mar["sigma_ml"] = sigma_ml;
+mar["w_cov"] = w_cov;
+mar["prior"] = prior;
+# mar["mean_lambda"] = mean_lambda;
+# mar["bic"] = -0.5*N*logdet(B) - 0.5*k*log(ns);
+mar["a_post"] = zeros(nd, nd, p);
+for i = 1:p
+  start = (i-1)*nd+1;
+  stop = (i-1)*nd+1+(nd-1);
+  # Transpose and swap signs for compatibility with spectral estimation function
+  mar["a_post"][:, :, i] = -w_mean[start:stop,:]';
+end
+# Swap signs for compatibility with spectral estimation function
+mar["wmean"] = -w_mean;
+mar["nd"] = nd;
+
+return mar
