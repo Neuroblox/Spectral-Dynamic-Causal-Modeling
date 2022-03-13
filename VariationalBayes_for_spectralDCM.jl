@@ -94,24 +94,50 @@ function csd2mar(csd, w, dt, p)
     end
     a = B\A
 
-    noise_cov  = ccf[1,:,:] - A'*a
+    Σ  = ccf[1,:,:] - A'*a   # noise covariance matrix
     lags = [-a[i:p:m*p, :] for i = 1:p]
-    return (lags, noise_cov)
+    mar = Dict([("A", lags), ("Σ", Σ), ("p", p)])
+    return mar
 end
 
-function mar2csd(lags, noise_cov, p, freqs)
-    dim = size(noise_cov, 1)
-    sf = 2*freqs[end]
-    w  = 2*pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz?
+function mar2csd(mar, freqs, sf)
+    Σ = mar["Σ"]
+    p = mar["p"]
+    A = mar["A"]
+    nd = size(Σ, 1)
+    w  = 2*pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz? Also clearly freqs[end] is not the sampling frequency of the signal...
+    print(w' ≈ matread("testmar.mat")["w"])
     nf = length(w)
-	csd = zeros(ComplexF64, nf, dim, dim)
+	csd = zeros(ComplexF64, nf, nd, nd)
 	for i = 1:nf
 		af_tmp = I
 		for k = 1:p
-			af_tmp = af_tmp + lags[k] * exp(-im * k * w[i])
+			af_tmp = af_tmp + A[k] * exp(-im * k * w[i])
 		end
 		iaf_tmp = inv(af_tmp)
-		csd[i,:,:] = iaf_tmp * noise_cov * iaf_tmp'     # is this really the covariance or rather precision?!
+		csd[i,:,:] = iaf_tmp * Σ * iaf_tmp'     # is this really the covariance or rather precision?!
+	end
+    csd = 2*csd/sf
+    print(csd ≈ matread("testmar.mat")["csd"])
+    return csd
+end
+
+function mar2csd(mar, freqs)
+    sf = 2*freqs[end]
+    Σ = mar["Σ"]
+    p = mar["p"]
+    A = mar["A"]
+    nd = size(Σ, 1)
+    w  = 2pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz? Also clearly freqs[end] is not the sampling frequency of the signal...
+    nf = length(w)
+	csd = zeros(ComplexF64, nf, nd, nd)
+	for i = 1:nf
+		af_tmp = I
+		for k = 1:p
+			af_tmp = af_tmp + A[k] * exp(-im * k * w[i])
+		end
+		iaf_tmp = inv(af_tmp)
+		csd[i,:,:] = iaf_tmp * Σ * iaf_tmp'     # is this really the covariance or rather precision?!
 	end
     csd = 2*csd/sf
     return csd
@@ -159,7 +185,7 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     return G + Gn
 end
 
-function csd_fmri_mtf(x, w, p, param)
+function csd_fmri_mtf(x, freqs, p, param)
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
     C = param[(1+dim^2):(3+dim^2)]
@@ -169,10 +195,10 @@ function csd_fmri_mtf(x, w, p, param)
     α = param[[9+dim^2, 11+dim^2]]
     β = param[[10+dim^2, 12+dim^2]]
     γ = param[(13+dim^2):(15+dim^2)]
-    G = csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
-    dt  = 1/(2*w[end])
-    lags, noise_cov = csd2mar(G, w, dt, p-1)
-    y = mar2csd(lags, noise_cov, p-1, w)
+    G = csd_approx(x, freqs, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
+    dt  = 1/(2*freqs[end])
+    mar = csd2mar(G, freqs, dt, p-1)
+    y = mar2csd(mar, freqs)
     return y
 end
 

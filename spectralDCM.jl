@@ -7,7 +7,7 @@ using Serialization
 
 include("hemodynamic_response.jl")
 include("VariationalBayes_for_spectralDCM.jl")
-
+include("mar.jl")
 
 function csd_Q(csd)
     s = size(csd)
@@ -28,10 +28,17 @@ end
 
 ### DEFINE SEVERAL VARIABLES AND PRIORS TO GET STARTED ###
 
-vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_demodata_notsparse.mat")
-y_csd = vars["csd"];
-w = vec(vars["M_nosparse"]["Hz"]);
-A = vars["M_nosparse"]["pE"]["A"];    # see table 1 in friston2014 for values of priors 
+vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_demodata_notsparse.mat");
+Y = vars["Y"];
+dt = vars["dt"];
+p = 8;
+mar = mar_ml(Y,p);
+freqs = vec(vars["M_nosparse"]["Hz"]);
+y_csd = mar2csd(mar, freqs, dt^-1);
+
+# vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_LFP.mat")
+# y_csd = vars["csd"];
+A = vars["M_nosparse"]["pE"]["A"];
 θΣ = vars["M_nosparse"]["pC"];
 λμ = vec(vars["M_nosparse"]["hE"]);
 Πλ_p = vars["M_nosparse"]["ihC"];
@@ -48,7 +55,6 @@ end
 
 dim = size(A, 1);
 C = zeros(Float64, dim);    # NB: whatever C is defined to be here, it will be replaced in csd_approx. A little strange thing of SPM12
-p = 8;
 α = [0.0, 0.0];
 β = [0.0, 0.0];
 γ = zeros(Float64, dim);
@@ -56,12 +62,12 @@ lnϵ = 0.0;                        # BOLD signal parameter
 lndecay = 0.0;                    # hemodynamic parameter
 lntransit = zeros(Float64, dim);  # hemodynamic parameters
 x = zeros(Float64, 3, 5);
-param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; α[1]; β[1]; α[2]; β[2]; γ;]
+param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; α[1]; β[1]; α[2]; β[2]; γ;];
 # Strange α and β sorting? yes. This is to be consistent with the SPM12 code while keeping nomenclature consistent with the spectral DCM paper
-priors = [Πθ_p, Πλ_p, λμ]
+priors = [Πθ_p, Πλ_p, λμ];
 
 
-results = VariationalBayes(x, y_csd, w, V, param, priors, 5)
+results = VariationalBayes(x, y_csd, freqs, V, param, priors, 26)
 
 
 res = matread("/home/david/Projects/neuroblox/data/LFPdata/Session LP052410/Stationary Data/Labeled - Pre/results.mat")
