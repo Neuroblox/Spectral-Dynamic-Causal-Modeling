@@ -67,19 +67,4 @@ param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; α[1]; β[1]; α[2];
 priors = [Πθ_p, Πλ_p, λμ];
 
 
-results = VariationalBayes(x, y_csd, freqs, V, param, priors, 26)
-
-
-res = matread("/home/david/Projects/neuroblox/data/LFPdata/Session LP052410/Stationary Data/Labeled - Pre/results.mat")
-rp = zeros(size(res["results_int"],1), 6)
-m = zeros(3,3)
-for i = 1:size(rp,1)
-    rp[i,:] = vec(res["results_int"][i,4])[[2 3 4 6 7 8]]
-    m .+= res["results_int"][i,4]
-end
-plot(rp, label=["a_11" "a_12" "a_13" "a_21" "a_22" "a_23" "a_31" "a_32" "a_33"], lw=2)
-plot(rp, label=["a_12" "a_13" "a_21" "a_23" "a_31" "a_32"], lw=2)
-xlabel!("samples interval")
-ylabel!("parameter value")
-title!("20000 samples window - off-diagonal elements")
-savefig("steadycheck_offdiag.png")
+results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
