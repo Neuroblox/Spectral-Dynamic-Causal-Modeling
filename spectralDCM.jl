@@ -5,9 +5,9 @@ using MAT
 using ExponentialUtilities
 using Serialization
 
-include("hemodynamic_response.jl")
-include("VariationalBayes_for_spectralDCM.jl")
-include("mar.jl")
+include("src/hemodynamic_response.jl")
+include("src/VariationalBayes_spm12.jl")
+include("src/mar.jl")
 
 function csd_Q(csd)
     s = size(csd)

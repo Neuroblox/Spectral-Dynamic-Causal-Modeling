@@ -1,3 +1,32 @@
+#= Define notational equivalences between SPM12 and this code:
+
+# the following two precision matrices will not be updated by the code,
+# they belong to the assumed prior distribution p (fixed, but what if it isn't
+# the ground truth?)
+ipC = Πθ_p   # precision matrix of prior of parameters p(θ)
+ihC = Πλ_p   # precision matrix of prior of hyperparameters p(λ)
+
+Variational distribution parameters:
+pE, Ep = θμ, μθ   # prior expectation of parameters (q(θ))
+pC, Cp = θΣ, Σθ   # prior covariance of parameters (q(θ))
+hE, Eh = λμ, μλ   # prior expectation of hyperparameters (q(λ))
+hC, Ch = λΣ, Σλ   # prior covariance of hyperparameters (q(λ))
+
+Σ, iΣ  # data covariance matrix (likelihood), and its inverse (precision of likelihood - use Π only for those precisions that don't change)
+Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
+=#
+
+# compute Jacobian of rhs w.r.t. variable -> matrix exponential solution (use ExponentialUtilities.jl)
+# -> use this numerical integration as solution to the diffeq to then differentiate solution w.r.t. parameters (like sensitivity analysis in Ma et al. 2021)
+# -> that Jacobian is used in all the computations of the variational Bayes
+
+
+# Define priors etc.
+# Q, θμ, θΣ, λμ, λΣ
+
+# pE.A = A/128; θμ?
+
+
 function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # compute transfer function of Volterra kernels, see fig 1 in friston2014
     # 1. compute jacobian w.r.t. f ; TODO: what is it with this "delay operator" that is set to 1 in "spm_fx_fmri.m"
