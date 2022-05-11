@@ -1,3 +1,4 @@
+"""
 #= Define notational equivalences between SPM12 and this code:
 
 # the following two precision matrices will not be updated by the code,
@@ -15,6 +16,7 @@ hC, Ch = λΣ, Σλ   # prior covariance of hyperparameters (q(λ))
 Σ, iΣ  # data covariance matrix (likelihood), and its inverse (precision of likelihood - use Π only for those precisions that don't change)
 Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 =#
+"""
 
 # compute Jacobian of rhs w.r.t. variable -> matrix exponential solution (use ExponentialUtilities.jl)
 # -> use this numerical integration as solution to the diffeq to then differentiate solution w.r.t. parameters (like sensitivity analysis in Ma et al. 2021)
@@ -24,10 +26,10 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 # Define priors etc.
 # Q, θμ, θΣ, λμ, λΣ
 
-# pE.A = A/128; θμ?
+# pE.A = A/128; θμ
 
 
-function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
+function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates to: spm_dcm_mtf.m
     # compute transfer function of Volterra kernels, see fig 1 in friston2014
     # 1. compute jacobian w.r.t. f ; TODO: what is it with this "delay operator" that is set to 1 in "spm_fx_fmri.m"
     # J_x = jacobian(f, x0) # well, no need to perform this for a linear system... we already have it: θμ
@@ -39,7 +41,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # if I eventually need also the change of variables rather than just the derivative then here is where to fix it!
     nd = size(θμ, 1)
     J_tot = [θμ zeros(nd, size(J, 2));   # add derivatives w.r.t. neural signal
-             [Matrix(1.0I, size(θμ)); zeros(size(J)[1]-nd, size(θμ)[2])] J]
+            [Matrix(1.0I, size(θμ)); zeros(size(J)[1]-nd, size(θμ)[2])] J]
 
     dfdu = [C; 
             zeros(size(J,1), size(C, 2))]
@@ -58,11 +60,8 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
     #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
     dgdx = boldsignal(x, lnϵ)[2]
-    # var = matread("../matlabspectrum.mat")
-    # V = var["v"]
-    # Λ = var["s"]
-    dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
-    dvdu  = pinv(V)*dfdu
+    dgdv = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
+    dvdu = pinv(V)*dfdu
 
     nw = size(w,1)            # number of frequencies
     ng = size(dgdx,1)         # number of outputs
@@ -135,7 +134,6 @@ function mar2csd(mar, freqs, sf)
     A = mar["A"]
     nd = size(Σ, 1)
     w  = 2*pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz? Also clearly freqs[end] is not the sampling frequency of the signal...
-    print(w' ≈ matread("testmar.mat")["w"])
     nf = length(w)
 	csd = zeros(ComplexF64, nf, nd, nd)
 	for i = 1:nf
@@ -147,7 +145,6 @@ function mar2csd(mar, freqs, sf)
 		csd[i,:,:] = iaf_tmp * Σ * iaf_tmp'     # is this really the covariance or rather precision?!
 	end
     csd = 2*csd/sf
-    print(csd ≈ matread("testmar.mat")["csd"])
     return csd
 end
 
@@ -214,16 +211,16 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     return G + Gn
 end
 
-function csd_fmri_mtf(x, freqs, p, param)
+function csd_fmri_mtf(x, freqs, p, param)   # alongside the above realtes to spm_csd_fmri_mtf.m
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
-    C = param[(1+dim^2):(3+dim^2)]
-    lntransit = param[(4+dim^2):(6+dim^2)]
-    lndecay = param[7+dim^2]
-    lnϵ = param[8+dim^2]
-    α = param[[9+dim^2, 11+dim^2]]
-    β = param[[10+dim^2, 12+dim^2]]
-    γ = param[(13+dim^2):(15+dim^2)]
+    C = param[(1+dim^2):(dim+dim^2)]
+    lntransit = param[(1+dim+dim^2):(2dim+dim^2)]
+    lndecay = param[1+2dim+dim^2]
+    lnϵ = param[2+2dim+dim^2]
+    α = param[[3+2dim+dim^2, 5+2dim+dim^2]]
+    β = param[[4+2dim+dim^2, 6+2dim+dim^2]]
+    γ = param[(7+2dim+dim^2):(6+3dim+dim^2)]
     G = csd_approx(x, freqs, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     dt  = 1/(2*freqs[end])
     mar = csd2mar(G, freqs, dt, p-1)
@@ -264,30 +261,56 @@ function spm_logdet(M)
     return sum(log.(s[(s .> TOL) .& (s .< TOL^-1)]))
 end
 
+function csd_Q(csd)
+    s = size(csd)
+    Qn = length(csd)
+    Q = zeros(ComplexF64, Qn, Qn);
+    idx = CartesianIndices(csd)
+    for Qi  = 1:Qn
+        for Qj = 1:Qn
+            if idx[Qi][1] == idx[Qj][1]
+                Q[Qi,Qj] = csd[idx[Qi][1], idx[Qi][2], idx[Qj][2]]*csd[idx[Qi][1], idx[Qi][3], idx[Qj][3]]
+            end
+        end
+    end
+    Q = inv(Q .+ matlab_norm(Q, 1)/32*Matrix(I, size(Q)))   # TODO: MATLAB's and Julia's norm function are different! Reconciliate?
+    return Q
+    # the following routine is for situations where no Q is given apriori
+    # Q = zeros(ny,ny,nr)
+    # for i = 1:nr
+    #     Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
+    # end
 
-function variationalbayes(x, y, w, V, param, priors, niter)
+end
+
+mutable struct vb_state
+    iter::Int
+    F::Float64
+    λ::Vector{Float64}
+    ϵ_θ::Vector{Float64}
+    μθ::Vector{Float64}
+    Σθ::Matrix{Float64}
+end
+
+function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_nlsi_GN.m
     # extract priors
     Πθ_p = priors[1]
     Πλ_p = priors[2]
-    λμ = vec(priors[3])
+    λμ = priors[3]
+    Q = priors[4]
 
     # prep stuff
     p = Int(param[1])
     θμ = param[2:end]          # note: μθ is posterior and θμ is prior
     np = size(V, 2)            # number of parameters
     ny = length(y)             # total number of response variables
-    ns = size(y, 1)            # number of samples
-    nr = ny÷ns                 # number of response components
+    # ns = size(y, 1)            # number of samples
+    # nr = ny÷ns                 # number of response components
     nq = 1
-    ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
-    μθ = θμ + V*ϵ_θ
-
-    Q = zeros(ny,ny,nr)
-    for i = 1:nr
-        Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
-    end
     nh = size(Q,3)             # number of precision components (this is the same as above, but may differ)
     λ = 8 * ones(nh)
+    ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
+    μθ = θμ + V*ϵ_θ
 
     dx = exp(-8)
     revert = false
@@ -296,18 +319,18 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     # state variable
     F = -Inf
     F0 = F
-    state = Dict("F"=>F, "ϵ_θ" => zeros(np), "λ" => λ, "μθ" => μθ, "Σθ" => inv(Πθ_p))
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
-    Σθ = similar(Πθ_p)
-    Σλ = similar(Πθ_p)
-    iΣ = zeros(ny, ny)
-    ϵ_λ = similar(λμ)
-
+    state = vb_state(0, F, zeros(np), λ, μθ, inv(Πθ_p))
+    local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
+    dFdh = zeros(ComplexF64, nh)
+    dFdhh = zeros(Float64, nh, nh)
     for k = 1:niter
+        state.iter = k
 
         dfdp, f = diff(V, dx, f_prep, μθ);
         dfdp = transpose(reshape(dfdp, np, ny))
+        # @show dfdp ≈ matread("dfdp" * string(k) * ".mat")["dfdp"]
 
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
@@ -320,9 +343,9 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
                 # E-Step: update
                 if t > exp(16)
-                    ϵ_θ = state["ϵ_θ"] - inv(dFdpp)*dFdp    # -inv(dfdx)*f
+                    ϵ_θ = state.ϵ_θ - inv(dFdpp)*dFdp    # -inv(dfdx)*f
                 else
-                    ϵ_θ = state["ϵ_θ"] + expv(t, dFdpp, inv(dFdpp)*dFdp) -inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                    ϵ_θ = state.ϵ_θ + expv(t, dFdpp, inv(dFdpp)*dFdp) -inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
                 end
 
                 μθ = θμ + V*ϵ_θ
@@ -333,7 +356,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)
                 # check for stability
                 norm_dfdp = matlab_norm(dfdp, Inf);
                 revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
-        
+
                 # break
                 if ~revert
                     break
@@ -347,16 +370,13 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
 
         ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
-        for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
-            iΣ = zeros(ny, ny)
+        for m = 1:8   # 8 seems arbitrary. This is probably because optimization falls often into a periodic orbit. ToDo: Issue #8
+            iΣ = zeros(ComplexF64, ny, ny)
             for i = 1:nh
                 iΣ .+= Q[:,:,i]*exp(λ[i])
             end
-
-            Σ = inv(iΣ)             # Julia requires conversion to dense matrix before inversion so just use dense from the get-go
-            Pp = zeros(ComplexF64, size(Πθ_p))
-            mul!(Pp, J', iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
-            Pp = real(Pp)
+            Σ = inv(iΣ)               # Julia requires conversion to dense matrix before inversion so just use dense to begin with
+            Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
             Σθ = inv(Pp + Πθ_p)
 
             P = similar(Q)
@@ -368,12 +388,10 @@ function variationalbayes(x, y, w, V, param, priors, niter)
                 JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above), what's the rational?
             end
 
-            dFdh = zeros(nh)
-            dFdhh = zeros(nh, nh)
             for i = 1:nh
                 dFdh[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ,P[:,:,i],ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
                 for j = i:nh
-                    dFdhh[i, j] = - tr(PΣ[:,:,i] * PΣ[:,:,j])*nq/2
+                    dFdhh[i, j] = - real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2     # eps = randn(sizen), (eps' * Ai) * (Aj * eps)
                     dFdhh[j, i] = dFdhh[i, j]
                 end
             end
@@ -382,35 +400,30 @@ function variationalbayes(x, y, w, V, param, priors, niter)
             dFdh = dFdh - Πλ_p*ϵ_λ
             dFdhh = dFdhh - Πλ_p
             Σλ = inv(-dFdhh)
-
+            
             t = exp(4 - spm_logdet(dFdhh)/length(λ))
             # E-Step: update
             if t > exp(16)
-                dλ = -inv(dFdhh) * dFdh
+                dλ = -real(inv(dFdhh) * dFdh)
             else
-                dλ = expv(t, dFdhh, inv(dFdhh)*dFdh) -inv(dFdhh)*dFdh   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                dλ = real(expv(t, dFdhh, inv(dFdhh)*dFdh) -inv(dFdhh)*dFdh)   # (expm(dfdx*t) - I)*inv(dfdx)*f
             end
 
             dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
             λ = λ + dλ
-            # print("hyperparam: ", λ ≈ matread(string("dfdp_iter", k, m, ".mat"))["h"], "\n")
-            # print(λ, vec(matread(string("dfdp_iter", k, m, ".mat"))["h"]), "\n")
-            # print("delta param: ", dλ ≈ matread(string("dfdp_iter", k, m, ".mat"))["dh"], "\n")
-            # print(dλ, vec(matread(string("dfdp_iter", k, m, ".mat"))["dh"]), "\n")
-            # print("error:", ϵ_λ ≈ matread(string("dfdp_iter", k, m, ".mat"))["d"], "\n")
 
-            dF = dot(dFdh,dλ)
+            dF = dot(dFdh, dλ)
             # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
             # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
             # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
-            if dF < 1e-2
+            if real(dF) < 1e-2
                 break
             end
         end
 
         ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
         L = zeros(3)
-        L[1] = (logdet(iΣ)*nq  - real(ϵ' * iΣ * ϵ) - ny*log(2pi))/2
+        L[1] = (real(logdet(iΣ))*nq  - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
         L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ, Πθ_p, ϵ_θ))/2
         L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2;
         F = sum(L);
@@ -419,27 +432,28 @@ function variationalbayes(x, y, w, V, param, priors, niter)
             F0 = F
         end
 
-        if F > state["F"] || k < 3
+        if F > state.F || k < 3
             # accept current state
-            state["F"] = F
-            state["ϵ_θ"] = ϵ_θ
-            state["λ"] = λ
-            state["Σθ"] = Σθ
-            state["μθ"] = μθ
+            state.F = F
+            state.ϵ_θ = ϵ_θ
+            state.λ = λ
+            state.Σθ = Σθ
+            state.μθ = μθ
             # Conditional update of gradients and curvature
-            dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ   # check sign!!
+            dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ
             dFdpp = -real(J' * iΣ * J) - Πθ_p
             # decrease regularization
             v = min(v + 1/2,4);
         else
             # reset expansion point
-            ϵ_θ = state["ϵ_θ"]
-            λ = state["λ"]
+            ϵ_θ = state.ϵ_θ
+            λ = state.λ
             # and increase regularization
             v = min(v - 2,-4);
         end
 
         # E-Step: update
+        # @show dFdpp ≈ matread("dFdpp" * string(k) * ".mat")["dFdpp"]
         t = exp(v - spm_logdet(dFdpp)/np)
         if t > exp(16)
             dθ = - inv(dFdpp)*dFdp    # -inv(dfdx)*f
@@ -449,10 +463,10 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
         ϵ_θ += dθ
         μθ = θμ + V*ϵ_θ
-        dF  = dot(dFdp, ϵ_θ);
+        dF  = dot(dFdp, dθ);
 
         # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times
-        print("iteration: ", k, " - F:", state["F"] - F0, " - dF predicted:", dF, "\n")
+        print("iteration: ", k, " - F:", state.F - F0, " - dF predicted:", dF, "\n")
         criterion = vcat(dF < 1e-1, criterion[1:end - 1]);
         if all(criterion)
             print("convergence\n")
@@ -460,8 +474,8 @@ function variationalbayes(x, y, w, V, param, priors, niter)
         end
     end
     print("iterations terminated\n")
-    state["F"] = F
-    state["Σθ"] = V*Σθ*V'
-    state["μθ"] = μθ
+    state.F = F
+    state.Σθ = V*Σθ*V'
+    state.μθ = μθ
     return state
 end

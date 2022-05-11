@@ -41,7 +41,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     J_tot = [θμ zeros(nd, size(J, 2));   # add derivatives w.r.t. neural signal
              [Matrix(1.0I, size(θμ)); zeros(size(J)[1]-nd, size(θμ)[2])] J]
 
-    dfdu = [C; 
+    dfdu = [C;
             zeros(size(J,1), size(C, 2))]
 
     F = eigen(J_tot, sortby=nothing, permute=true)
@@ -58,9 +58,6 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
     #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
     dgdx = boldsignal(x, lnϵ)[2]
-    # var = matread("../matlabspectrum.mat")
-    # V = var["v"]
-    # Λ = var["s"]
     dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
     dvdu  = pinv(V)*dfdu
 
@@ -135,7 +132,6 @@ function mar2csd(mar, freqs, sf)
     A = mar["A"]
     nd = size(Σ, 1)
     w  = 2*pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz? Also clearly freqs[end] is not the sampling frequency of the signal...
-    print(w' ≈ matread("testmar.mat")["w"])
     nf = length(w)
 	csd = zeros(ComplexF64, nf, nd, nd)
 	for i = 1:nf
@@ -147,7 +143,6 @@ function mar2csd(mar, freqs, sf)
 		csd[i,:,:] = iaf_tmp * Σ * iaf_tmp'     # is this really the covariance or rather precision?!
 	end
     csd = 2*csd/sf
-    print(csd ≈ matread("testmar.mat")["csd"])
     return csd
 end
 
@@ -393,11 +388,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
             dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
             λ = λ + dλ
-            # print("hyperparam: ", λ ≈ matread(string("dfdp_iter", k, m, ".mat"))["h"], "\n")
-            # print(λ, vec(matread(string("dfdp_iter", k, m, ".mat"))["h"]), "\n")
-            # print("delta param: ", dλ ≈ matread(string("dfdp_iter", k, m, ".mat"))["dh"], "\n")
-            # print(dλ, vec(matread(string("dfdp_iter", k, m, ".mat"))["dh"]), "\n")
-            # print("error:", ϵ_λ ≈ matread(string("dfdp_iter", k, m, ".mat"))["d"], "\n")
 
             dF = dot(dFdh,dλ)
             # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
