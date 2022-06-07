@@ -25,6 +25,46 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 # Q, θμ, θΣ, λμ, λΣ
 
 # pE.A = A/128; θμ?
+using LinearAlgebra: Eigen
+using ForwardDiff: Dual
+using ForwardDiff: Partials
+using ChainRules: _eigen_norm_phase_fwd!
+
+function LinearAlgebra.eigen(M::Matrix{Dual{T, P, N}}) where {T,P,N}
+    np = length(M[1].partials)
+    nd = size(M, 1)
+    A = (p->p.value).(M)
+    F = eigen(A)
+    λ, V = F.values, F.vectors
+    local ∂λ_agg, ∂V_agg
+    for i = 1:np
+        dA = (p->p.partials[i]).(M)
+        tmp = V \ dA
+        ∂K = tmp * V   # V^-1 * dA * V
+        ∂Kdiag = @view ∂K[diagind(∂K)]
+        ∂λ_tmp = eltype(λ) <: Real ? real.(∂Kdiag) : copy(∂Kdiag)
+        ∂K ./= transpose(λ) .- λ
+        fill!(∂Kdiag, 0)
+        ∂V_tmp = mul!(tmp, V, ∂K)
+        _eigen_norm_phase_fwd!(∂V_tmp, A, V)
+        if i == 1
+            ∂V_agg = ∂V_tmp
+            ∂λ_agg = ∂λ_tmp
+        else
+            ∂V_agg = cat(∂V_agg, ∂V_tmp, dims=3)
+            ∂λ_agg = cat(∂λ_agg, ∂λ_tmp, dims=2)
+        end
+    end
+    ∂V = Array{Partials}(undef, nd, nd)
+    ∂λ = Array{Partials}(undef, nd)
+    for i = 1:nd
+        ∂λ[i] = Partials(Tuple(∂λ_agg[i, :]))
+        for j = 1:nd
+            ∂V[i, j] = Partials(Tuple(∂V_agg[i, j, :]))
+        end
+    end
+    return Eigen(Dual.(F.values, ∂λ), Dual.(F.vectors, ∂V))
+end
 
 
 function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
@@ -259,6 +299,28 @@ function spm_logdet(M)
     return sum(log.(s[(s .> TOL) .& (s .< TOL^-1)]))
 end
 
+function csd_Q(csd)
+    s = size(csd)
+    Qn = length(csd)
+    Q = zeros(ComplexF64, Qn, Qn);
+    idx = CartesianIndices(csd)
+    for Qi  = 1:Qn
+        for Qj = 1:Qn
+            if idx[Qi][1] == idx[Qj][1]
+                Q[Qi,Qj] = csd[idx[Qi][1], idx[Qi][2], idx[Qj][2]]*csd[idx[Qi][1], idx[Qi][3], idx[Qj][3]]
+            end
+        end
+    end
+    Q = inv(Q .+ matlab_norm(Q, 1)/32*Matrix(I, size(Q)))   # TODO: MATLAB's and Julia's norm function are different! Reconciliate?
+    return Q
+    # the following routine is for situations where no Q is given apriori
+    # Q = zeros(ny,ny,nr)
+    # for i = 1:nr
+    #     Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
+    # end
+
+end
+
 
 function variationalbayes(x, y, w, V, param, priors, niter)
     # extract priors
@@ -276,7 +338,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     nq = 1
     ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
     μθ = θμ + V*ϵ_θ
-
+@show ny,nr
     Q = zeros(ny,ny,nr)
     for i = 1:nr
         Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
@@ -300,8 +362,10 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     ϵ_λ = similar(λμ)
 
     for k = 1:niter
-
-        dfdp, f = diff(V, dx, f_prep, μθ);
+        f = f_prep(μθ)
+        dfdp = ForwardDiff.jacobian(f_prep, μθ)
+        @show dfdp
+        # dfdp, f = diff(V, dx, f_prep, μθ);
         dfdp = transpose(reshape(dfdp, np, ny))
 
         norm_dfdp = matlab_norm(dfdp, Inf);

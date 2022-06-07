@@ -4,14 +4,15 @@ using FFTW
 using ToeplitzMatrices
 using MAT
 using ExponentialUtilities
+using ForwardDiff
 
 # using Serialization
 # using Profile
 # using ProfileView
-using BenchmarkTools
+# using BenchmarkTools
 
 include("src/hemodynamic_response.jl")
-include("src/VariationalBayes_spm12.jl")
+include("src/VariationalBayes_AD.jl")
 include("src/mar.jl")
 
 function Base.vec(x::T) where (T <: Real)
@@ -20,7 +21,7 @@ end
 ### DEFINE SEVERAL VARIABLES AND PRIORS TO GET STARTED ###
 vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_demodata.mat");
 # vars = matread("/home/david/Projects/neuroblox/data/fMRIdata/Bernal-Casas/timeseries_D1.mat")
-function speedtest(vars)
+# function speedtest(vars)
     y = vars["data"];
     dt = vars["dt"];
     freqs = vec(vars["Hz"]);
@@ -64,20 +65,21 @@ function speedtest(vars)
 
     results = variationalbayes(x, y_csd, freqs, V, param, priors, 128)
     return results
-end
+# end
 
-# ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
+# speedtest(vars)
+# # ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
 
-# res = @benchmark speedtest(vars)
-# t_julia = mean(res.times./10^9);
-t_julia = @elapsed speedtest(vars)
-n = "14"
-file = matopen("data_speedtest/nregions" * n * ".mat")
-t_matlab = read(file, "matcomptime")
-close(file)
-iter = 20
-matwrite("data_speedtest/n" * n * ".mat", Dict(
-	"t_matlab" => t_matlab,
-	"t_julia" => t_julia,
-    "iter" => iter
-); compress = true)
+# # res = @benchmark speedtest(vars)
+# # t_julia = mean(res.times./10^9);
+# t_julia = @elapsed speedtest(vars)
+# n = "14"
+# file = matopen("data_speedtest/nregions" * n * ".mat")
+# t_matlab = read(file, "matcomptime")
+# close(file)
+# iter = 20
+# matwrite("data_speedtest/n" * n * ".mat", Dict(
+# 	"t_matlab" => t_matlab,
+# 	"t_julia" => t_julia,
+#     "iter" => iter
+# ); compress = true)
