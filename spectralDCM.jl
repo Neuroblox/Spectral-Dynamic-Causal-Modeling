@@ -31,8 +31,8 @@ vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_de
 
     x = vars["x"];           # initial condition of dynamic variabls
     A = vars["pE"]["A"];
-    # A += Matrix(1.0I,size(A));       # add some randomness to the prior to avoid degenerate eigenvalues later on
-    # A .*= 0.01 .+ 0.1*randn(size(A));
+    A += Matrix(1.0I,size(A));       # add some randomness to the prior to avoid degenerate eigenvalues later on
+    A .*= 0.01 .+ 0.1*randn(size(A));
     θΣ = vars["pC"];
     λμ = vec(vars["hE"]);
     Πλ_p = vars["ihC"];
@@ -64,7 +64,7 @@ vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_de
     priors = [Πθ_p, Πλ_p, λμ, Q];
 
     results = variationalbayes(x, y_csd, freqs, V, param, priors, 128)
-    return results
+    # return results
 # end
 
 # speedtest(vars)

@@ -29,6 +29,10 @@ using LinearAlgebra: Eigen
 using ForwardDiff: Dual
 using ForwardDiff: Partials
 using ChainRules: _eigen_norm_phase_fwd!
+using Serialization
+ForwardDiff.can_dual(::Type{ComplexF64}) = true
+Base.eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
+Base.signbit(x::Complex{T}) where {T<:AbstractFloat} = real(x) < 0
 
 function LinearAlgebra.eigen(M::Matrix{Dual{T, P, N}}) where {T,P,N}
     np = length(M[1].partials)
@@ -63,7 +67,7 @@ function LinearAlgebra.eigen(M::Matrix{Dual{T, P, N}}) where {T,P,N}
             ∂V[i, j] = Partials(Tuple(∂V_agg[i, j, :]))
         end
     end
-    return Eigen(Dual.(F.values, ∂λ), Dual.(F.vectors, ∂V))
+    return Eigen(Dual{T}.(F.values, ∂λ), Dual{T}.(F.vectors, ∂V))
 end
 
 
@@ -84,7 +88,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     dfdu = [C;
             zeros(size(J,1), size(C, 2))]
 
-    F = eigen(J_tot, sortby=nothing, permute=true)
+    F = eigen(J_tot)#, sortby=nothing, permute=true)
     Λ = F.values
     V = F.vectors
 
@@ -98,8 +102,8 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
     #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
     dgdx = boldsignal(x, lnϵ)[2]
-    dgdv  = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
-    dvdu  = pinv(V)*dfdu
+    dgdv = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
+    dvdu = pinv(V)*dfdu
 
     nw = size(w,1)            # number of frequencies
     ng = size(dgdx,1)         # number of outputs
@@ -216,10 +220,10 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     # define function that implements spectra given in equation (2) of "A DCM for resting state fMRI".
 
     # neuronal fluctuations (Gu) (1/f or AR(1) form)
-    Gu = zeros(nw, nd, nd)
-    Gn = zeros(nw, nd, nd)
     G = w.^(-exp(β[1]))   # spectrum of hidden dynamics
     G /= sum(G)
+    Gu = zeros(typeof(G[1]), nw, nd, nd)
+    Gn = zeros(typeof(G[1]), nw, nd, nd)
     for i = 1:nd
         Gu[:, i, i] .+= exp(α[1])*G
     end
@@ -338,7 +342,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     nq = 1
     ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
     μθ = θμ + V*ϵ_θ
-@show ny,nr
     Q = zeros(ny,ny,nr)
     for i = 1:nr
         Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
@@ -364,7 +367,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     for k = 1:niter
         f = f_prep(μθ)
         dfdp = ForwardDiff.jacobian(f_prep, μθ)
-        @show dfdp
         # dfdp, f = diff(V, dx, f_prep, μθ);
         dfdp = transpose(reshape(dfdp, np, ny))
 

@@ -46,13 +46,13 @@ function hemodynamics!(dx, x, na, decay, transit)
 
     # implement differential state equation f = dx/dt (hemodynamic)
 
-    dx[:, 1] = na .- κ.*x[:, 1] .- H[2]*(x[:, 2] .- 1)   # Corresponds to eq (9)
-    dx[:, 2] = x[:, 1]./x[:, 2]  # Corresponds to eq (10), note the added logarithm (see doc string)
-    dx[:, 3] = (x[:, 2] .- fv)./(τ.*x[:, 3])    # Corresponds to eq (8), note the added logarithm (see doc string)
-    dx[:, 4] = (ff.*x[:, 2] .- fv.*x[:, 4]./x[:, 3])./(τ.*x[:, 4])  # Corresponds to eq (8), note the added logarithm (see doc string)
+    # dx[:, 1] = na .- κ.*x[:, 1] .- H[2]*(x[:, 2] .- 1)   # Corresponds to eq (9)
+    # dx[:, 2] = x[:, 1]./x[:, 2]  # Corresponds to eq (10), note the added logarithm (see doc string)
+    # dx[:, 3] = (x[:, 2] .- fv)./(τ.*x[:, 3])    # Corresponds to eq (8), note the added logarithm (see doc string)
+    # dx[:, 4] = (ff.*x[:, 2] .- fv.*x[:, 4]./x[:, 3])./(τ.*x[:, 4])  # Corresponds to eq (8), note the added logarithm (see doc string)
 
     d = size(x)[1]   # number of dimensions, equals typically number of regions
-    J = zeros(4d, 4d)
+    J = zeros(typeof(κ), 4d, 4d)
 
     J[1:d,1:d] = Matrix(-κ*I, d, d)   # TODO: make it work when κ/decay is a vector. Only solution if-clause? diagm doesn't allow scalars, [κ] would work in that case
     J[1:d,d+1:2d] = diagm(-H[2]*x[:,2])
@@ -116,7 +116,7 @@ function boldsignal(x, lnϵ)
     bold = V0*(k1 .- k1*q .+ k2 .- k2*q./ν .+ k3 .- k3*ν)
 
     nd = size(x, 1)
-    ∇ = zeros(nd, 2nd)
+    ∇ = zeros(typeof(k3), nd, 2nd)
     ∇[1:nd, 1:nd]     = diagm(-V0*(k3*ν .- k2*q./ν))    # TODO: it is unclear why this is the correct gradient, do the algebra... (note this is a gradient per area, not a Jacobian)
     ∇[1:nd, nd+1:2nd] = diagm(-V0*(k1*q .+ k2*q./ν))
 
