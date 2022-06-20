@@ -29,14 +29,14 @@ using LinearAlgebra: Eigen
 using ForwardDiff: Dual
 using ForwardDiff: Partials
 using ChainRules: _eigen_norm_phase_fwd!
+# using DualNumbers
 using Serialization
-ForwardDiff.can_dual(::Type{ComplexF64}) = true
-Base.eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
-Base.signbit(x::Complex{T}) where {T<:AbstractFloat} = real(x) < 0
+# ForwardDiff.can_dual(::Type{ComplexF64}) = true
+# Base.eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
+# Base.signbit(x::Complex{T}) where {T<:AbstractFloat} = real(x) < 0
 
-function LinearAlgebra.eigen(M::Matrix{Dual{T, P, N}}) where {T,P,N}
-    np = length(M[1].partials)
-    nd = size(M, 1)
+function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
+    nd = size(M, 1)  
     A = (p->p.value).(M)
     F = eigen(A)
     λ, V = F.values, F.vectors
@@ -67,7 +67,15 @@ function LinearAlgebra.eigen(M::Matrix{Dual{T, P, N}}) where {T,P,N}
             ∂V[i, j] = Partials(Tuple(∂V_agg[i, j, :]))
         end
     end
-    return Eigen(Dual{T}.(F.values, ∂λ), Dual{T}.(F.vectors, ∂V))
+    @show eltype(V), @show eltype(λ)
+    if eltype(V) <: Complex
+        evals = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
+        evecs = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
+    else
+        evals = Dual{T}(F.values, ∂λ)
+        evecs = Dual{T}(F.vectors, ∂V)
+    end
+    return Eigen(evals, evecs)
 end
 
 
@@ -91,7 +99,6 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     F = eigen(J_tot)#, sortby=nothing, permute=true)
     Λ = F.values
     V = F.vectors
-
     # condition unstable eigenmodes
     # if max(w) > 1
     #     s = 1j*imag(s) + real(s) - exp(real(s));
@@ -99,7 +106,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     #     s = 1j*imag(s) + min(real(s),-1/32);
     # end
 
-    # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
+    # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian... it isn't! if anything it should be a gradient since the BOLD signal is scalar
     #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
     dgdx = boldsignal(x, lnϵ)[2]
     dgdv = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
