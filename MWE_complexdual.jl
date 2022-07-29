@@ -1,5 +1,27 @@
 using LinearAlgebra: I, Matrix
 using ForwardDiff: Dual
+using FFTW
+
+function dft(x::AbstractArray)
+    """discrete fourier transform"""
+    N = size(x)[1]
+    out = Array{Any}(undef,N)
+    for k in 0:N-1
+        out[k+1] = sum([x[n+1]*exp(-2*im*π*k*n/N) for n in 0:N-1])
+    end
+    return out
+end
+
+function idft(x::AbstractArray)
+    """discrete inverse fourier transform"""
+    N = size(x)[1]
+    out = Array{Any}(undef,N)
+    for n in 0:N-1
+        out[n+1] = 1/N*sum([x[k+1]*exp(2*im*π*k*n/N) for k in 0:N-1])
+    end
+    return out
+end
+
 
 # My own toy model for ADing a CSD computation based on MARs
 
@@ -36,10 +58,8 @@ end
 p = Dual(2.0, (1.0, 0.0));
 q = Dual(3.0, (0.0, 1.0));
 # p, q = 2.3,3.4
-A = [p 0.5im;
+A = [p 0.5;
      0.5 q];
-
-map(x->Complex(Dual(2.0, real(x)), Dual(2.0im, imag(x))), (p->p.partials).(A))
 
 csd(A)
 
@@ -83,6 +103,7 @@ f(Dual(z₀,1)).epsilon   #(instead of partials)
 
 
 # simplest possible example, taken from ForwardDiff test environment https://github.com/JuliaDiff/ForwardDiff.jl/blob/master/test/DerivativeTest.jl
+# can't evaluate derivative at complex value, only real works
 using ForwardDiff
 f(x) = x -> (1+im)*x^2
 ForwardDiff.derivative(f(x), 1)

@@ -29,18 +29,21 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 # pE.A = A/128; θμ
 
 
+"""
+    This is essentially K(ω) in the spectral DCM paper.
+"""
 function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates to: spm_dcm_mtf.m
-    # compute transfer function of Volterra kernels, see fig 1 in friston2014
+    # compute transfer function of Volterra kernels, see fig 1 in friston2014 (spectral DCM paper)
     # 1. compute jacobian w.r.t. f ; TODO: what is it with this "delay operator" that is set to 1 in "spm_fx_fmri.m"
     # J_x = jacobian(f, x0) # well, no need to perform this for a linear system... we already have it: θμ
-    C /= 16.0   # TODO: unclear why it is devided by 16 but see spm_fx_fmri.m:49
+    C /= 16.0   # TODO: unclear why C is devided by 16 but see spm_fx_fmri.m:49
     # 2. get jacobian of hemodynamics
     dx = similar(x[:, 2:end])
     J = hemodynamics!(dx, x[:, 2:end], x[:, 1], lndecay, lntransit)[2]
     θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
     # if I eventually need also the change of variables rather than just the derivative then here is where to fix it!
     nd = size(θμ, 1)
-    J_tot = [θμ zeros(nd, size(J, 2));   # add derivatives w.r.t. neural signal
+    J_tot = [θμ zeros(nd, size(J, 2));   # add derivatives w.r.t. neural signal; this is the total Jacobian of the underlying dynamics ∂ₓf in the paper
             [Matrix(1.0I, size(θμ)); zeros(size(J)[1]-nd, size(θμ)[2])] J]
 
     dfdu = [C; 
@@ -169,18 +172,26 @@ function mar2csd(mar, freqs)
     return csd
 end
 
+"""
+    Main function in which actually some interesting computation happens. This function implements equation 2 of the spectral DCM paper.
+    Note that nomenclature is taken from SPM12 code and it does not seem to coincide with the spectral DCM paper's nomenclature. 
+    For instance, Gu should represent the spectral component due to external input according to the paper. However, in the code this represents
+    the hidden state fluctuations (which are called Gν in the paper).
+    Gn in the code corresponds to Ge in the paper, i.e. the observation noise. In the code global and local components are defined, no such distinction
+    is discussed in the paper. In fact the parameter γ, corresponding to local component is not present in the paper.
+"""
 function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     # priors of spectral parameters
     # ln(α) and ln(β), region specific fluctuations: ln(γ)
     nw = length(w)
     nd = size(θμ, 1)
 
-    # define function that implements spectra given in equation (2) of "A DCM for resting state fMRI".
+    # define function that implements spectra given in equation (2) of the paper "A DCM for resting state fMRI".
 
     # neuronal fluctuations (Gu) (1/f or AR(1) form)
     Gu = zeros(nw, nd, nd)
     Gn = zeros(nw, nd, nd)
-    G = w.^(-exp(β[1]))   # spectrum of hidden dynamics
+    G = w.^(-exp(β[1]))    # spectrum of hidden dynamics
     G /= sum(G)
     for i = 1:nd
         Gu[:, i, i] .+= exp(α[1])*G
@@ -199,8 +210,9 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
             Gn[:,j,i] = Gn[:,i,j]
         end
     end
-    C = Matrix(I, nd, nd)
-    S = transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
+    C = Matrix(I, nd, nd)     # here C is overwritten, whatever it was before, doesn't matter. This is SPM12 code, unclear how this makes sense.
+
+    S = transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # This is K(ω) in the equations of the spectral DCM paper.
 
     # predicted cross-spectral density
     G = zeros(ComplexF64,nw,nd,nd);
@@ -211,6 +223,10 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     return G + Gn
 end
 
+"""
+    Main function that computes the CSD: first arrange parameters, then call csd_approx which actually computes the CSD, and finally transform and back-transform to and from MAR.
+    It is unclear why this last step is performed. A possible purpose is smoothing of the CSD, but this step is not documented anywhere and just taken as is from SPM12.
+"""
 function csd_fmri_mtf(x, freqs, p, param)   # alongside the above realtes to spm_csd_fmri_mtf.m
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
@@ -222,7 +238,10 @@ function csd_fmri_mtf(x, freqs, p, param)   # alongside the above realtes to spm
     β = param[[4+2dim+dim^2, 6+2dim+dim^2]]
     γ = param[(7+2dim+dim^2):(6+3dim+dim^2)]
     G = csd_approx(x, freqs, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
-    dt  = 1/(2*freqs[end])
+    dt = 1/(2*freqs[end])
+    # the following two steps are very opaque. They are taken from the SPM code but it is unclear what the purpose of this transformation and back-transformation is
+    # in particular it is also unclear why the order of the MAR is reduced by 1. My best guess is that this procedure smoothens the results.
+    # But this does not correspond to any equation in the papers nor is it commented in the SPM12 code.
     mar = csd2mar(G, freqs, dt, p-1)
     y = mar2csd(mar, freqs)
     return y
@@ -330,7 +349,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
 
         dfdp, f = diff(V, dx, f_prep, μθ);
         dfdp = transpose(reshape(dfdp, np, ny))
-        # @show dfdp ≈ matread("dfdp" * string(k) * ".mat")["dfdp"]
 
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);

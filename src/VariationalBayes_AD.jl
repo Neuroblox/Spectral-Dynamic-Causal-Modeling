@@ -25,6 +25,7 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 # Q, θμ, θΣ, λμ, λΣ
 
 # pE.A = A/128; θμ?
+using LinearAlgebra
 using LinearAlgebra: Eigen
 using ForwardDiff: Dual
 using ForwardDiff: Partials
@@ -67,7 +68,6 @@ function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
             ∂V[i, j] = Partials(Tuple(∂V_agg[i, j, :]))
         end
     end
-    @show eltype(V), @show eltype(λ)
     if eltype(V) <: Complex
         evals = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
         evecs = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
@@ -110,7 +110,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
     dgdx = boldsignal(x, lnϵ)[2]
     dgdv = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
-    dvdu = pinv(V)*dfdu
+    dvdu = V\dfdu
 
     nw = size(w,1)            # number of frequencies
     ng = size(dgdx,1)         # number of outputs
@@ -130,6 +130,21 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     return S
 end
 
+function idft(x::AbstractArray)
+    """discrete inverse fourier transform"""
+    N = size(x)[1]
+    out = Array{eltype(x)}(undef,N)
+    for n in 0:N-1
+        out[n+1] = 1/N*sum([x[k+1]*exp(2*im*π*k*n/N) for k in 0:N-1])
+    end
+    return out
+end
+
+function fftshift(x, dim = 1:ndims(x))
+    s = ntuple(d -> d in dim ? div(size(x,d),2) : 0, Val(ndims(x)))
+    circshift(x, s)
+end
+
 function csd2mar(csd, w, dt, p)
     # TODO: investiagate why SymmetricToeplitz(ccf[1:p, i, j]) is not good to be used but instead need to use Toeplitz(ccf[1:p, i, j], ccf[1:p, j, i])
     # as is done in the original MATLAB code (confront comment there). ccf should be a symmetric matrix so there should be no difference between the
@@ -142,15 +157,16 @@ function csd2mar(csd, w, dt, p)
     N = ceil(Int64, ns/2/dw)
     gj = findall(x -> x > 0 && x < (N + 1), w)
     gi = gj .+ (ceil(Int64, w[1]) - 1)    # TODO: figure out what's the purpose of this!
-    g = zeros(ComplexF64, N)
+    g = zeros(eltype(csd), N)
 
     # transform to cross-correlation function
     ccf = zeros(ComplexF64, N*2+1, size(csd,2), size(csd,3))
     for i = 1:size(csd, 2)
         for j = 1:size(csd, 3)
             g[gi] = csd[gj,i,j]
-            f = ifft(g)
-            f = ifft(vcat([0.0im; g; conj(g[end:-1:1])]))
+            f = idft(g)
+            f = idft(vcat([0.0im; g; conj(g[end:-1:1])]))
+            @show typeof(f)
             ccf[:,i,j] = real.(fftshift(f))*N*dw
         end
     end
@@ -229,8 +245,8 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     # neuronal fluctuations (Gu) (1/f or AR(1) form)
     G = w.^(-exp(β[1]))   # spectrum of hidden dynamics
     G /= sum(G)
-    Gu = zeros(typeof(G[1]), nw, nd, nd)
-    Gn = zeros(typeof(G[1]), nw, nd, nd)
+    Gu = zeros(eltype(G), nw, nd, nd)
+    Gn = zeros(eltype(G), nw, nd, nd)
     for i = 1:nd
         Gu[:, i, i] .+= exp(α[1])*G
     end
@@ -252,7 +268,7 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     S = transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
 
     # predicted cross-spectral density
-    G = zeros(ComplexF64,nw,nd,nd);
+    G = zeros(eltype(S),nw,nd,nd);
     for i = 1:nw
         G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
     end
@@ -332,6 +348,14 @@ function csd_Q(csd)
 
 end
 
+mutable struct vb_state
+    iter::Int
+    F::Float64
+    λ::Vector{Float64}
+    ϵ_θ::Vector{Float64}
+    μθ::Vector{Float64}
+    Σθ::Matrix{Float64}
+end
 
 function variationalbayes(x, y, w, V, param, priors, niter)
     # extract priors
@@ -363,18 +387,17 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     # state variable
     F = -Inf
     F0 = F
-    state = Dict("F"=>F, "ϵ_θ" => zeros(np), "λ" => λ, "μθ" => μθ, "Σθ" => inv(Πθ_p))
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
-    Σθ = similar(Πθ_p)
-    Σλ = similar(Πθ_p)
-    iΣ = zeros(ny, ny)
-    ϵ_λ = similar(λμ)
-
+    state = vb_state(0, F, zeros(np), λ, μθ, inv(Πθ_p))
+    local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
+    dFdh = zeros(ComplexF64, nh)
+    dFdhh = zeros(Float64, nh, nh)
     for k = 1:niter
+        state.iter = k
+
         f = f_prep(μθ)
         dfdp = ForwardDiff.jacobian(f_prep, μθ)
-        # dfdp, f = diff(V, dx, f_prep, μθ);
         dfdp = transpose(reshape(dfdp, np, ny))
 
         norm_dfdp = matlab_norm(dfdp, Inf);
