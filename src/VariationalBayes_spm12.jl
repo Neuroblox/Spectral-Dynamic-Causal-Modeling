@@ -349,7 +349,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
 
         dfdp, f = diff(V, dx, f_prep, μθ);
         dfdp = transpose(reshape(dfdp, np, ny))
-
+        serialize("foo.bar", dfdp)
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
@@ -418,7 +418,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
             dFdh = dFdh - Πλ_p*ϵ_λ
             dFdhh = dFdhh - Πλ_p
             Σλ = inv(-dFdhh)
-            serialize("foo.bar", dFdhh)
 
             t = exp(4 - spm_logdet(dFdhh)/length(λ))
             # E-Step: update

@@ -150,7 +150,6 @@ function csd2mar(csd, w, dt, p)
     # as is done in the original MATLAB code (confront comment there). ccf should be a symmetric matrix so there should be no difference between the
     # Toeplitz matrices but for the second jacobian (J[2], see for loop for i = 1:nJ in function diff) the computation produces subtle differences between
     # the two versions.
-
     dw = w[2] - w[1]
     w = w/dw
     ns = dt^-1
@@ -396,12 +395,15 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
     state = vb_state(0, F, λ, zeros(np), μθ, inv(Πθ_p))
+
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
     for k = 1:niter
         state.iter = k
 
         f = f_prep(μθ)
         dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
+        dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
+        serialize("foo.bar", dfdp)
 
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
@@ -508,12 +510,11 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
         if F > state.F || k < 3
             # accept current state
-            serialize("foo.bar", (state, F, λ))
-            state.ϵ_θ = ϵ_θ.value
-            state.λ = (p->p.value).(λ)
-            state.Σθ = (p->p.value).(Σθ)
+            state.ϵ_θ = ϵ_θ
+            state.λ = λ
+            state.Σθ = Σθ
             state.μθ = μθ
-            state.F = F.value
+            state.F = F
             # Conditional update of gradients and curvature
             dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ    # check sign
             dFdpp = -real(J' * iΣ * J) - Πθ_p
