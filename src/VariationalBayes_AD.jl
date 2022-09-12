@@ -140,10 +140,10 @@ function idft(x::AbstractArray)
     return out
 end
 
-function fftshift(x, dim = 1:ndims(x))
-    s = ntuple(d -> d in dim ? div(size(x,d),2) : 0, Val(ndims(x)))
-    circshift(x, s)
-end
+# function fftshift(x, dim = 1:ndims(x))
+#     s = ntuple(d -> d in dim ? div(size(x,d),2) : 0, Val(ndims(x)))
+#     circshift(x, s)
+# end
 
 function csd2mar(csd, w, dt, p)
     # TODO: investiagate why SymmetricToeplitz(ccf[1:p, i, j]) is not good to be used but instead need to use Toeplitz(ccf[1:p, i, j], ccf[1:p, j, i])
@@ -160,13 +160,12 @@ function csd2mar(csd, w, dt, p)
     g = zeros(eltype(csd), N)
 
     # transform to cross-correlation function
-    ccf = zeros(ComplexF64, N*2+1, size(csd,2), size(csd,3))
+    ccf = zeros(eltype(csd), N*2+1, size(csd,2), size(csd,3))
     for i = 1:size(csd, 2)
         for j = 1:size(csd, 3)
             g[gi] = csd[gj,i,j]
             f = idft(g)
             f = idft(vcat([0.0im; g; conj(g[end:-1:1])]))
-            @show typeof(f)
             ccf[:,i,j] = real.(fftshift(f))*N*dw
         end
     end
@@ -177,8 +176,8 @@ function csd2mar(csd, w, dt, p)
     n = (N - 1) ÷ 2
     p = min(p, n - 1)
     ccf = ccf[(1:n) .+ n,:,:]
-    A = zeros(m*p, m)
-    B = zeros(m*p, m*p)
+    A = zeros(eltype(csd), m*p, m)
+    B = zeros(eltype(csd), m*p, m*p)
     for i = 1:m
         for j = 1:m
             A[((i-1)*p+1):i*p, j] = ccf[(1:p) .+ 1, i, j]
@@ -221,7 +220,7 @@ function mar2csd(mar, freqs)
     nd = size(Σ, 1)
     w  = 2pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz? Also clearly freqs[end] is not the sampling frequency of the signal...
     nf = length(w)
-	csd = zeros(ComplexF64, nf, nd, nd)
+	csd = zeros(eltype(Σ), nf, nd, nd)
 	for i = 1:nf
 		af_tmp = I
 		for k = 1:p
@@ -326,6 +325,19 @@ function spm_logdet(M)
     return sum(log.(s[(s .> TOL) .& (s .< TOL^-1)]))
 end
 
+# function spm_logdet(M::Matrix{Dual{T, P, np}}) where {T, P, np}
+#     A = (p->real(p).value).(M)
+#     F = eigen(A)
+#     λ, V = F.values, F.vectors
+#     TOL = 1e-16
+#     s = diag(M)
+#     if sum(abs.(s)) != sum(abs.(M[:]))
+#         ~, s, ~ = svd(M)
+#     end
+#     serialize("foo.bar", s)
+#     return sum(log.(s[(s .> TOL) .& (s .< TOL^-1)]))
+# end
+
 function csd_Q(csd)
     s = size(csd)
     Qn = length(csd)
@@ -361,26 +373,20 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     # extract priors
     Πθ_p = priors[1]
     Πλ_p = priors[2]
-    λμ = vec(priors[3])
+    λμ = priors[3]
+    Q = priors[4]
 
     # prep stuff
     p = Int(param[1])
     θμ = param[2:end]          # note: μθ is posterior and θμ is prior
     np = size(V, 2)            # number of parameters
     ny = length(y)             # total number of response variables
-    ns = size(y, 1)            # number of samples
-    nr = ny÷ns                 # number of response components
     nq = 1
-    ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
-    μθ = θμ + V*ϵ_θ
-    Q = zeros(ny,ny,nr)
-    for i = 1:nr
-        Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
-    end
     nh = size(Q,3)             # number of precision components (this is the same as above, but may differ)
     λ = 8 * ones(nh)
-
-    dx = exp(-8)
+    ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
+    μθ = θμ + V*ϵ_θ
+ 
     revert = false
     f_prep = param -> csd_fmri_mtf(x, w, p, param)
 
@@ -389,16 +395,13 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     F0 = F
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
-    state = vb_state(0, F, zeros(np), λ, μθ, inv(Πθ_p))
+    state = vb_state(0, F, λ, zeros(np), μθ, inv(Πθ_p))
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
-    dFdh = zeros(ComplexF64, nh)
-    dFdhh = zeros(Float64, nh, nh)
     for k = 1:niter
         state.iter = k
 
         f = f_prep(μθ)
-        dfdp = ForwardDiff.jacobian(f_prep, μθ)
-        dfdp = transpose(reshape(dfdp, np, ny))
+        dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
 
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
@@ -411,16 +414,16 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
                 # E-Step: update
                 if t > exp(16)
-                    ϵ_θ = state["ϵ_θ"] - inv(dFdpp)*dFdp    # -inv(dfdx)*f
+                    ϵ_θ = state.ϵ_θ - inv(dFdpp)*dFdp    # -inv(dfdx)*f
                 else
-                    ϵ_θ = state["ϵ_θ"] + expv(t, dFdpp, inv(dFdpp)*dFdp) -inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                    ϵ_θ = state.ϵ_θ + expv(t, dFdpp, inv(dFdpp)*dFdp) -inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
                 end
 
                 μθ = θμ + V*ϵ_θ
 
-                dfdp, f = diff(V, dx, f_prep, μθ);
-                dfdp = transpose(reshape(dfdp, np, ny))
-
+                f = f_prep(μθ)
+                dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
+        
                 # check for stability
                 norm_dfdp = matlab_norm(dfdp, Inf);
                 revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
@@ -439,32 +442,29 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
         ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
         for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
-            iΣ = zeros(ny, ny)
+            iΣ = zeros(eltype(J), ny, ny)
             for i = 1:nh
                 iΣ .+= Q[:,:,i]*exp(λ[i])
             end
 
             Σ = inv(iΣ)             # Julia requires conversion to dense matrix before inversion so just use dense from the get-go
-            Pp = zeros(ComplexF64, size(Πθ_p))
-            mul!(Pp, J', iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
-            Pp = real(Pp)
+            Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
             Σθ = inv(Pp + Πθ_p)
 
-            P = similar(Q)
-            PΣ = similar(Q)
-            JPJ = zeros(size(Pp,1), size(Pp,2), size(Q,3))
+            P = zeros(eltype(J), size(Q))
+            PΣ = zeros(eltype(J), size(Q))
+            JPJ = zeros(real(eltype(J)), size(Pp,1), size(Pp,2), size(Q,3))
             for i = 1:nh
                 P[:,:,i] = Q[:,:,i]*exp(λ[i])
                 PΣ[:,:,i] = P[:,:,i] * Σ
                 JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above), what's the rational?
             end
-
-            dFdh = zeros(nh)
-            dFdhh = zeros(nh, nh)
+            dFdh = zeros(eltype(J), nh)
+            dFdhh = zeros(real(eltype(J)), nh, nh)
             for i = 1:nh
-                dFdh[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ,P[:,:,i],ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
+                dFdh[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
                 for j = i:nh
-                    dFdhh[i, j] = - tr(PΣ[:,:,i] * PΣ[:,:,j])*nq/2
+                    dFdhh[i, j] = -real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2
                     dFdhh[j, i] = dFdhh[i, j]
                 end
             end
@@ -477,26 +477,27 @@ function variationalbayes(x, y, w, V, param, priors, niter)
             t = exp(4 - spm_logdet(dFdhh)/length(λ))
             # E-Step: update
             if t > exp(16)
-                dλ = -inv(dFdhh) * dFdh
+                dλ = -real(inv(dFdhh) * dFdh)
             else
-                dλ = expv(t, dFdhh, inv(dFdhh)*dFdh) -inv(dFdhh)*dFdh   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                idFdhh = inv(dFdhh)
+                dλ = real(exponential!(t * dFdhh) * idFdhh*dFdh - idFdhh*dFdh)   # (expm(dfdx*t) - I)*inv(dfdx)*f ~~~ could also be done with expv but doesn't work with Dual.
             end
 
             dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
             λ = λ + dλ
 
-            dF = dot(dFdh,dλ)
+            dF = dot(dFdh, dλ)
             # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
             # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
             # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
-            if dF < 1e-2
+            if real(dF) < 1e-2
                 break
             end
         end
 
         ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
-        L = zeros(3)
-        L[1] = (logdet(iΣ)*nq  - real(ϵ' * iΣ * ϵ) - ny*log(2pi))/2
+        L = zeros(real(eltype(iΣ)), 3)
+        L[1] = (real(logdet(iΣ))*nq  - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
         L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ, Πθ_p, ϵ_θ))/2
         L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2;
         F = sum(L);
@@ -505,24 +506,25 @@ function variationalbayes(x, y, w, V, param, priors, niter)
             F0 = F
         end
 
-        if F > state["F"] || k < 3
+        if F > state.F || k < 3
             # accept current state
-            state["F"] = F
-            state["ϵ_θ"] = ϵ_θ
-            state["λ"] = λ
-            state["Σθ"] = Σθ
-            state["μθ"] = μθ
+            serialize("foo.bar", (state, F, λ))
+            state.ϵ_θ = ϵ_θ.value
+            state.λ = (p->p.value).(λ)
+            state.Σθ = (p->p.value).(Σθ)
+            state.μθ = μθ
+            state.F = F.value
             # Conditional update of gradients and curvature
-            dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ   # check sign!!
+            dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ    # check sign
             dFdpp = -real(J' * iΣ * J) - Πθ_p
             # decrease regularization
-            v = min(v + 1/2,4);
+            v = min(v + 1/2, 4);
         else
             # reset expansion point
-            ϵ_θ = state["ϵ_θ"]
-            λ = state["λ"]
+            ϵ_θ = state.ϵ_θ
+            λ = state.λ
             # and increase regularization
-            v = min(v - 2,-4);
+            v = min(v - 2, -4);
         end
 
         # E-Step: update
@@ -530,7 +532,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)
         if t > exp(16)
             dθ = - inv(dFdpp)*dFdp    # -inv(dfdx)*f
         else
-            dθ = exp(t * dFdpp) * inv(dFdpp)*dFdp - inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
+            dθ = exponential!(t * dFdpp) * inv(dFdpp)*dFdp - inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
         end
 
         ϵ_θ += dθ
@@ -538,7 +540,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)
         dF  = dot(dFdp, ϵ_θ);
 
         # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times
-        print("iteration: ", k, " - F:", state["F"] - F0, " - dF predicted:", dF, "\n")
+        print("iteration: ", k, " - F:", state.F - F0, " - dF predicted:", dF, "\n")
         criterion = vcat(dF < 1e-1, criterion[1:end - 1]);
         if all(criterion)
             print("convergence\n")
@@ -546,8 +548,8 @@ function variationalbayes(x, y, w, V, param, priors, niter)
         end
     end
     print("iterations terminated\n")
-    state["F"] = F
-    state["Σθ"] = V*Σθ*V'
-    state["μθ"] = μθ
+    state.F = F
+    state.Σθ = V*Σθ*V'
+    state.μθ = μθ
     return state
 end

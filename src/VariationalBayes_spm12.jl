@@ -340,7 +340,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
     F0 = F
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
-    state = vb_state(0, F, zeros(np), λ, μθ, inv(Πθ_p))
+    state = vb_state(0, F, λ, zeros(np), μθ, inv(Πθ_p))
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
     dFdh = zeros(ComplexF64, nh)
     dFdhh = zeros(Float64, nh, nh)
@@ -418,7 +418,8 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
             dFdh = dFdh - Πλ_p*ϵ_λ
             dFdhh = dFdhh - Πλ_p
             Σλ = inv(-dFdhh)
-            
+            serialize("foo.bar", dFdhh)
+
             t = exp(4 - spm_logdet(dFdhh)/length(λ))
             # E-Step: update
             if t > exp(16)
@@ -441,6 +442,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
 
         ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
         L = zeros(3)
+        @show eltype(iΣ), eltype(Σθ), eltype(Σλ), eltype(ϵ_θ), eltype(ϵ_λ), eltype(ϵ)
         L[1] = (real(logdet(iΣ))*nq  - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
         L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ, Πθ_p, ϵ_θ))/2
         L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2;
@@ -471,7 +473,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
         end
 
         # E-Step: update
-        # @show dFdpp ≈ matread("dFdpp" * string(k) * ".mat")["dFdpp"]
         t = exp(v - spm_logdet(dFdpp)/np)
         if t > exp(16)
             dθ = - inv(dFdpp)*dFdp    # -inv(dfdx)*f
