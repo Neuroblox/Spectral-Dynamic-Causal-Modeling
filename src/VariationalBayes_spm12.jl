@@ -28,6 +28,8 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 
 # pE.A = A/128; θμ
 
+using Serialization
+
 
 """
     This is essentially K(ω) in the spectral DCM paper.
@@ -52,6 +54,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates t
     F = eigen(J_tot, sortby=nothing, permute=true)
     Λ = F.values
     V = F.vectors
+    serialize("foo.poo", (J_tot, F))
 
     # condition unstable eigenmodes
     # if max(w) > 1
@@ -81,6 +84,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates t
             end
         end
     end
+    serialize("foo.poo", (S))
     return S
 end
 

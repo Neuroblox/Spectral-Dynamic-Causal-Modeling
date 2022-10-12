@@ -29,25 +29,30 @@ using LinearAlgebra
 using LinearAlgebra: Eigen
 using ForwardDiff: Dual
 using ForwardDiff: Partials
+using SparseDiffTools
+ForwardDiff.can_dual(::Type{Complex{Float64}}) = true
 using ChainRules: _eigen_norm_phase_fwd!
 # using DualNumbers
 using Serialization
-# ForwardDiff.can_dual(::Type{ComplexF64}) = true
+tagtype(::Dual{T,V,N}) where {T,V,N} = T
+
 # Base.eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
 # Base.signbit(x::Complex{T}) where {T<:AbstractFloat} = real(x) < 0
+struct NeurobloxTag end
 
 function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
-    nd = size(M, 1)  
+    nd = size(M, 1)
     A = (p->p.value).(M)
-    F = eigen(A)
+    F = eigen(A, sortby=nothing, permute=true)
     λ, V = F.values, F.vectors
     local ∂λ_agg, ∂V_agg
+    # compute eigenvalue and eigenvector derivatives for all partials
     for i = 1:np
         dA = (p->p.partials[i]).(M)
         tmp = V \ dA
         ∂K = tmp * V   # V^-1 * dA * V
         ∂Kdiag = @view ∂K[diagind(∂K)]
-        ∂λ_tmp = eltype(λ) <: Real ? real.(∂Kdiag) : copy(∂Kdiag)
+        ∂λ_tmp = eltype(λ) <: Real ? real.(∂Kdiag) : copy(∂Kdiag)   # why do only copy when complex??
         ∂K ./= transpose(λ) .- λ
         fill!(∂Kdiag, 0)
         ∂V_tmp = mul!(tmp, V, ∂K)
@@ -62,6 +67,7 @@ function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
     end
     ∂V = Array{Partials}(undef, nd, nd)
     ∂λ = Array{Partials}(undef, nd)
+    # reassemble the aggregated vectors and values into a Partials type
     for i = 1:nd
         ∂λ[i] = Partials(Tuple(∂λ_agg[i, :]))
         for j = 1:nd
@@ -69,8 +75,14 @@ function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
         end
     end
     if eltype(V) <: Complex
-        evals = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
-        evecs = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
+        # evals = map((x,y)->Complex(Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(real(x), Partials(Tuple(real(y)))), 
+        #                            Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
+        # evecs = map((x,y)->Complex(Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(real(x), Partials(Tuple(real(y)))), 
+        #                            Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
+        evals = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), 
+                                   Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
+        evecs = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), 
+                                   Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
     else
         evals = Dual{T}(F.values, ∂λ)
         evecs = Dual{T}(F.vectors, ∂V)
@@ -96,7 +108,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     dfdu = [C;
             zeros(size(J,1), size(C, 2))]
 
-    F = eigen(J_tot)#, sortby=nothing, permute=true)
+    F = eigen(J_tot) #, sortby=nothing, permute=true)
     Λ = F.values
     V = F.vectors
     # condition unstable eigenmodes
@@ -116,7 +128,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     ng = size(dgdx,1)         # number of outputs
     nu = size(dfdu,2)         # number of inputs
     nk = size(V,2)            # number of modes
-    S = zeros(Complex, nw, ng, nu)
+    S = zeros(eltype(dvdu), nw, ng, nu)
 
     for j = 1:nu
         for i = 1:ng
@@ -270,8 +282,11 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     for i = 1:nw
         G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
     end
-
-    return G + Gn
+    # @show ForwardDiff.value(G + Gn)
+    # @show ForwardDiff.partials(Complex{Float64}, G+Gn, 1:1)
+    # Main.foo[] = G + Gn
+    G_final = G + Gn
+    return G_final
 end
 
 function csd_fmri_mtf(x, freqs, p, param)
@@ -288,6 +303,13 @@ function csd_fmri_mtf(x, freqs, p, param)
     dt  = 1/(2*freqs[end])
     mar = csd2mar(G, freqs, dt, p-1)
     y = mar2csd(mar, freqs)
+    # T = typeof(ForwardDiff.Tag(NeurobloxTag(), ComplexF64))
+    if real(eltype(y)) <: Dual
+        y_vals = Complex.((p->p.value).(real(y)), (p->p.value).(imag(y)))
+        y_part = (p->p.partials).(real(y)) + (p->p.partials).(imag(y))*im
+        y = map((x1, x2) -> Dual{tagtype(real(y)[1]), ComplexF64, length(x2)}(x1, Partials(Tuple(x2))), y_vals, y_part)
+    end
+    @show eltype(y)
     return y
 end
 
@@ -401,9 +423,13 @@ function variationalbayes(x, y, w, V, param, priors, niter)
         state.iter = k
 
         f = f_prep(μθ)
-        dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
-        dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
-        serialize("foo.bar", dfdp)
+        # jac_prototype = Array{Dual{ForwardDiff.Tag{NeurobloxTag, ComplexF64}, ComplexF64, 12}}(undef, ny, np)
+        # @show typeof(jac_prototype)
+        dfdp = forwarddiff_color_jacobian(f_prep, μθ)
+        # forwarddiff_color_jacobian(f,x,ForwardColorJacCache(f,x,chunksize,tag = NeurobloxTag()),nothing)
+        dfdp = dfdp * V
+        # dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
+        # dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
 
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
@@ -425,7 +451,8 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
                 f = f_prep(μθ)
                 dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
-        
+                dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
+
                 # check for stability
                 norm_dfdp = matlab_norm(dfdp, Inf);
                 revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
@@ -499,10 +526,10 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
         ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
         L = zeros(real(eltype(iΣ)), 3)
-        L[1] = (real(logdet(iΣ))*nq  - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
+        L[1] = (real(logdet(iΣ))*nq - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
         L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ, Πθ_p, ϵ_θ))/2
-        L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2;
-        F = sum(L);
+        L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2
+        F = sum(L)
 
         if k == 1
             F0 = F
@@ -538,7 +565,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
         ϵ_θ += dθ
         μθ = θμ + V*ϵ_θ
-        dF  = dot(dFdp, ϵ_θ);
+        dF = dot(dFdp, ϵ_θ);
 
         # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times
         print("iteration: ", k, " - F:", state.F - F0, " - dF predicted:", dF, "\n")
