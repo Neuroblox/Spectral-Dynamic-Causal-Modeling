@@ -25,11 +25,10 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 # Q, θμ, θΣ, λμ, λΣ
 
 # pE.A = A/128; θμ?
-using LinearAlgebra
 using LinearAlgebra: Eigen
 using ForwardDiff: Dual
 using ForwardDiff: Partials
-using SparseDiffTools
+# using SparseDiffTools
 ForwardDiff.can_dual(::Type{Complex{Float64}}) = true
 using ChainRules: _eigen_norm_phase_fwd!
 # using DualNumbers
@@ -282,9 +281,6 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     for i = 1:nw
         G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
     end
-    # @show ForwardDiff.value(G + Gn)
-    # @show ForwardDiff.partials(Complex{Float64}, G+Gn, 1:1)
-    # Main.foo[] = G + Gn
     G_final = G + Gn
     return G_final
 end
@@ -303,13 +299,11 @@ function csd_fmri_mtf(x, freqs, p, param)
     dt  = 1/(2*freqs[end])
     mar = csd2mar(G, freqs, dt, p-1)
     y = mar2csd(mar, freqs)
-    # T = typeof(ForwardDiff.Tag(NeurobloxTag(), ComplexF64))
     if real(eltype(y)) <: Dual
         y_vals = Complex.((p->p.value).(real(y)), (p->p.value).(imag(y)))
         y_part = (p->p.partials).(real(y)) + (p->p.partials).(imag(y))*im
         y = map((x1, x2) -> Dual{tagtype(real(y)[1]), ComplexF64, length(x2)}(x1, Partials(Tuple(x2))), y_vals, y_part)
     end
-    @show eltype(y)
     return y
 end
 
@@ -345,19 +339,6 @@ function spm_logdet(M)
     end
     return sum(log.(s[(s .> TOL) .& (s .< TOL^-1)]))
 end
-
-# function spm_logdet(M::Matrix{Dual{T, P, np}}) where {T, P, np}
-#     A = (p->real(p).value).(M)
-#     F = eigen(A)
-#     λ, V = F.values, F.vectors
-#     TOL = 1e-16
-#     s = diag(M)
-#     if sum(abs.(s)) != sum(abs.(M[:]))
-#         ~, s, ~ = svd(M)
-#     end
-#     serialize("foo.bar", s)
-#     return sum(log.(s[(s .> TOL) .& (s .< TOL^-1)]))
-# end
 
 function csd_Q(csd)
     s = size(csd)
@@ -425,10 +406,9 @@ function variationalbayes(x, y, w, V, param, priors, niter)
         f = f_prep(μθ)
         # jac_prototype = Array{Dual{ForwardDiff.Tag{NeurobloxTag, ComplexF64}, ComplexF64, 12}}(undef, ny, np)
         # @show typeof(jac_prototype)
-        dfdp = forwarddiff_color_jacobian(f_prep, μθ)
+        # dfdp = forwarddiff_color_jacobian(f_prep, μθ) * V
         # forwarddiff_color_jacobian(f,x,ForwardColorJacCache(f,x,chunksize,tag = NeurobloxTag()),nothing)
-        dfdp = dfdp * V
-        # dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
+        dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
         # dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
 
         norm_dfdp = matlab_norm(dfdp, Inf);
@@ -442,16 +422,16 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
                 # E-Step: update
                 if t > exp(16)
-                    ϵ_θ = state.ϵ_θ - inv(dFdpp)*dFdp    # -inv(dfdx)*f
+                    ϵ_θ = state.ϵ_θ - dFdpp \ dFdp    # -inv(dfdx)*f
                 else
-                    ϵ_θ = state.ϵ_θ + expv(t, dFdpp, inv(dFdpp)*dFdp) -inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                    ϵ_θ = state.ϵ_θ + expv(t, dFdpp, dFdpp \ dFdp) - dFdpp \ dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
                 end
 
                 μθ = θμ + V*ϵ_θ
 
                 f = f_prep(μθ)
+                # dfdp = forwarddiff_color_jacobian(f_prep, μθ) * V
                 dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
-                dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
 
                 # check for stability
                 norm_dfdp = matlab_norm(dfdp, Inf);
@@ -506,7 +486,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)
             t = exp(4 - spm_logdet(dFdhh)/length(λ))
             # E-Step: update
             if t > exp(16)
-                dλ = -real(inv(dFdhh) * dFdh)
+                dλ = -real(dFdhh \ dFdh)
             else
                 idFdhh = inv(dFdhh)
                 dλ = real(exponential!(t * dFdhh) * idFdhh*dFdh - idFdhh*dFdh)   # (expm(dfdx*t) - I)*inv(dfdx)*f ~~~ could also be done with expv but doesn't work with Dual.
@@ -558,9 +538,9 @@ function variationalbayes(x, y, w, V, param, priors, niter)
         # E-Step: update
         t = exp(v - spm_logdet(dFdpp)/np)
         if t > exp(16)
-            dθ = - inv(dFdpp)*dFdp    # -inv(dfdx)*f
+            dθ = - inv(dFdpp) * dFdp    # -inv(dfdx)*f
         else
-            dθ = exponential!(t * dFdpp) * inv(dFdpp)*dFdp - inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
+            dθ = exponential!(t * dFdpp) * inv(dFdpp) * dFdp - inv(dFdpp) * dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
         end
 
         ϵ_θ += dθ

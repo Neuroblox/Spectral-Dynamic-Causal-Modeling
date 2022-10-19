@@ -1,3 +1,9 @@
+# using Profile
+using ProfileView
+using StatProfilerHTML
+using BenchmarkTools
+
+
 using LinearAlgebra
 using MKL
 using FFTW
@@ -6,6 +12,9 @@ using MAT
 using ExponentialUtilities
 using ForwardDiff
 
+### a few packages relevant for speed tests and profiling ###
+# using Serialization
+
 
 # simple dispatch for vec to deal with 1xN matrices
 function Base.vec(x::T) where (T <: Real)
@@ -13,12 +22,8 @@ function Base.vec(x::T) where (T <: Real)
 end
 
 include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                      # multivariate auto-regressive model functions
-
-
-foo = Ref{Any}()
-
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
 vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_demodata.mat");
@@ -28,6 +33,9 @@ freqs = vec(vars["Hz"]);
 p = 8;                               # order of MAR, it is hard-coded in SPM12 with this value. We will just use the same for now.
 mar = mar_ml(y, p);                  # compute MAR from time series y and model order p
 y_csd = mar2csd(mar, freqs, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
+foo1 = Ref{Any}()
+foo2 = Ref{Any}()
+foo3 = Ref{Any}()
 
 ### Define priors and initial conditions ###
 x = vars["x"];                       # initial condition of dynamic variabls
@@ -68,3 +76,25 @@ priors = [Πθ_p, Πλ_p, λμ, Q];
 
 ### Compute the DCM ###
 results = variationalbayes(x, y_csd, freqs, V, param, priors, 30)
+
+
+
+# res = @benchmark speedtest(vars)
+# t_julia = mean(res.times./10^9);
+t_julia = @elapsed speedtest(vars)
+n = "14"
+file = matopen("data_speedtest/nregions" * n * ".mat")
+t_matlab = read(file, "matcomptime")
+close(file)
+iter = 20
+matwrite("data_speedtest/n" * n * ".mat", Dict(
+	"t_matlab" => t_matlab,
+	"t_julia" => t_julia,
+    "iter" => iter
+); compress = true)
+
+
+### Speedtest - note that the above then needs to be defined within a function ###
+# speedtest(vars)
+ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
+@profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)

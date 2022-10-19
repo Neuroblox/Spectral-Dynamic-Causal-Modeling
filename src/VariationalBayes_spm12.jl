@@ -445,7 +445,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
 
         ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
         L = zeros(3)
-        @show eltype(iΣ), eltype(Σθ), eltype(Σλ), eltype(ϵ_θ), eltype(ϵ_λ), eltype(ϵ)
         L[1] = (real(logdet(iΣ))*nq  - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
         L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ, Πθ_p, ϵ_θ))/2
         L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2;
