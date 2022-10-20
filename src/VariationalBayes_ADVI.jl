@@ -30,6 +30,8 @@ dim = size(x, 1);
 σ_μ = 1.0
 σ_σ = 1.0
 
+foo = Ref{Any}()
+
 
 @model function fitADVI_csd(csd_data)
     # set priors of variable parameters
@@ -50,11 +52,14 @@ dim = size(x, 1);
     csd = csd_fmri_mtf(x, w, p, param)
     csd_real = real(csd_data)
     csd_imag = imag(csd_data)
-    for i = 1:length(csd_data)
-        csd_real[i] ~ Normal(real(csd[i]), 0.5)   # models sampling noise not observational noise (see paper)
-        csd_imag[i] ~ Normal(imag(csd[i]), 0.5)
-    end
+    Main.foo[] = csd_real, csd_imag
+    # for i = 1:length(csd_data)
+    #     csd_real[i] ~ Normal(real(csd[i]), 0.5)   # models sampling noise not observational noise (see paper)
+    #     csd_imag[i] ~ Normal(imag(csd[i]), 0.5)
+    # end
     # data = vec(csd_data)
+    csd_real ~ MvNormal(real(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
+    csd_imag ~ MvNormal(imag(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
     # data ~ MvNormal(vec(csd), Matrix((1.0 + 1.0im)I, length(csd), length(csd)))
 end
 
@@ -62,7 +67,7 @@ end
 modelEMn = fitADVI_csd(y_csd)
 Turing.setadbackend(:forwarddiff)
 advi = ADVI(10, 5000)
-setchunksize(4)
+setchunksize(8)
 q = vi(modelEMn, advi);
 
 # sampling

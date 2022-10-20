@@ -17,9 +17,6 @@ include("src/VariationalBayes_spm12.jl")      # this can be switched between _sp
 include("src/mar.jl")                      # multivariate auto-regressive model functions
 
 
-foo = Ref{Any}()
-
-
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
 vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_demodata.mat");
 y = vars["data"];
