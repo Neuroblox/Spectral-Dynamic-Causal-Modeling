@@ -21,11 +21,10 @@ function Base.vec(x::T) where (T <: Real)
     return x*ones(1)
 end
 
-include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-include("src/mar.jl")                      # multivariate auto-regressive model functions
+include("../src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
+include("../src/mar.jl")                      # multivariate auto-regressive model functions
 
-function wrapperfunction(vars)
+function wrapperfunction(vars, iter)
     y = vars["data"];
     dt = vars["dt"];
     freqs = vec(vars["Hz"]);
@@ -71,26 +70,35 @@ function wrapperfunction(vars)
     priors = [Πθ_p, Πλ_p, λμ, Q];
 
     ### Compute the DCM ###
-    results = variationalbayes(x, y_csd, freqs, V, param, priors, 30)
+    results = variationalbayes(x, y_csd, freqs, V, param, priors, iter)
     return results
 end
 
-### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_demodata.mat");
+local vals
+for n = 2:8
+    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/data_speedtest/nregions" * string(n) *".mat");
+    include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+    wrapperfunction(vals, 1)
+    t_juliaAD = @elapsed res_AD = wrapperfunction(vals, 128)
+    include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+    wrapperfunction(vals, 1)
+    t_juliaSPM = @elapsed res_spm = wrapperfunction(vals, 128)
+    @show t_juliaAD, t_juliaSPM
 
-# res = @benchmark speedtest(vars)
-# t_julia = mean(res.times./10^9);
-t_julia = @elapsed wrapperfunction(vars)
-n = "2"
+    matwrite("speedandaccuracy/n" * string(n) * ".mat", Dict(
+        "t_mat" => vals["matcomptime"],
+        "F_mat" => vals["F"],
+        "t_jad" => t_juliaAD,
+        "F_jad" => res_AD.F,
+        "t_jspm" => t_juliaSPM,
+        "F_jspm" => res_spm.F,
+    ); compress = true)    
+end
+
 file = matopen("data_speedtest/nregions" * n * ".mat")
 t_matlab = read(file, "matcomptime")
 close(file)
 iter = 20
-matwrite("data_speedtest/n" * n * ".mat", Dict(
-	"t_matlab" => t_matlab,
-	"t_julia" => t_julia,
-    "iter" => iter
-); compress = true)
 
 
 ### Speedtest - note that the above then needs to be defined within a function ###

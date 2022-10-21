@@ -288,13 +288,13 @@ end
 function csd_fmri_mtf(x, freqs, p, param)
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
-    C = param[(1+dim^2):(3+dim^2)]
-    lntransit = param[(4+dim^2):(6+dim^2)]
-    lndecay = param[7+dim^2]
-    lnϵ = param[8+dim^2]
-    α = param[[9+dim^2, 11+dim^2]]
-    β = param[[10+dim^2, 12+dim^2]]
-    γ = param[(13+dim^2):(15+dim^2)]
+    C = param[(1+dim^2):(dim+dim^2)]
+    lntransit = param[(1+dim+dim^2):(2dim+dim^2)]
+    lndecay = param[1+2dim+dim^2]
+    lnϵ = param[2+2dim+dim^2]
+    α = param[[3+2dim+dim^2, 5+2dim+dim^2]]
+    β = param[[4+2dim+dim^2, 6+2dim+dim^2]]
+    γ = param[(7+2dim+dim^2):(6+3dim+dim^2)]
     G = csd_approx(x, freqs, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     dt  = 1/(2*freqs[end])
     mar = csd2mar(G, freqs, dt, p-1)
@@ -395,6 +395,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)
     # state variable
     F = -Inf
     F0 = F
+    previous_F = F
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
     state = vb_state(0, F, λ, zeros(np), μθ, inv(Πθ_p))
@@ -545,7 +546,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)
 
         ϵ_θ += dθ
         μθ = θμ + V*ϵ_θ
-        dF = dot(dFdp, ϵ_θ);
+        dF = dot(dFdp, dθ);
 
         # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times
         print("iteration: ", k, " - F:", state.F - F0, " - dF predicted:", dF, "\n")
