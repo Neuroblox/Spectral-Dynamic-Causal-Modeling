@@ -14,6 +14,8 @@ for i = list
     append!(t_julspm, tmp["t_jspm"])
 end
 
-plot(list, (t_mat./t_jul.-1).*100, legend=false,xlabel="number of regions",ylabel="percentage speed increase", linewidth=3)
-scatter!(list, (t_mat./t_jul.-1).*100, markersize=6)
+plot(list, (t_mat./t_julad.-1).*100, legend=:topleft, xlabel="number of regions",ylabel="percentage speed increase", linewidth=3, label="AD")
+scatter!(list, (t_mat./t_julad.-1).*100, markersize=6, label=nothing)
+plot!(list, (t_mat./t_julspm.-1).*100, color="red", linewidth=3, label="SPM12")
+scatter!(list, (t_mat./t_julspm.-1).*100, markersize=6, label=nothing)
 title!("speed comparison between Julia and Matlab")
