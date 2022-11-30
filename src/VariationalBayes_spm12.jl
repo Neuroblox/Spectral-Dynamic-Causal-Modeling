@@ -34,7 +34,7 @@ using Serialization
 """
     This is essentially K(ω) in the spectral DCM paper.
 """
-function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates to: spm_dcm_mtf.m
+function transferfunction_fmri(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates to: spm_dcm_mtf.m
     # compute transfer function of Volterra kernels, see fig 1 in friston2014 (spectral DCM paper)
     # 1. compute jacobian w.r.t. f ; TODO: what is it with this "delay operator" that is set to 1 in "spm_fx_fmri.m"
     # J_x = jacobian(f, x0) # well, no need to perform this for a linear system... we already have it: θμ
@@ -54,7 +54,6 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates t
     F = eigen(J_tot, sortby=nothing, permute=true)
     Λ = F.values
     V = F.vectors
-    serialize("foo.poo", (J_tot, F))
 
     # condition unstable eigenmodes
     # if max(w) > 1
@@ -84,9 +83,63 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates t
             end
         end
     end
-    serialize("foo.poo", (S))
     return S
 end
+
+function transferfunction(f, x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates to: spm_dcm_mtf.m
+    # compute transfer function of Volterra kernels, see fig 1 in friston2014 (spectral DCM paper)
+    # 1. compute jacobian w.r.t. f ; TODO: what is it with this "delay operator" that is set to 1 in "spm_fx_fmri.m"
+    # J_x = jacobian(f, x0) # well, no need to perform this for a linear system... we already have it: θμ
+    # 2. get jacobian of hemodynamics
+    dx = similar(x[:, 2:end])
+    @named f = connectcomplexblox(f, A)
+    f = structural_simplify(f)
+
+    J = hemodynamics!(dx, x[:, 2:end], x[:, 1], lndecay, lntransit)[2]
+    θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
+    # if I eventually need also the change of variables rather than just the derivative then here is where to fix it!
+    nd = size(θμ, 1)
+    J_tot = [θμ zeros(nd, size(J, 2));   # add derivatives w.r.t. neural signal; this is the total Jacobian of the underlying dynamics ∂ₓf in the paper
+            [Matrix(1.0I, size(θμ)); zeros(size(J)[1]-nd, size(θμ)[2])] J]
+
+    dfdu = [C; 
+            zeros(size(J,1), size(C, 2))]
+
+    F = eigen(J_tot, sortby=nothing, permute=true)
+    Λ = F.values
+    V = F.vectors
+
+    # condition unstable eigenmodes
+    # if max(w) > 1
+    #     s = 1j*imag(s) + real(s) - exp(real(s));
+    # else
+    #     s = 1j*imag(s) + min(real(s),-1/32);
+    # end
+
+    # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
+    #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
+    dgdx = boldsignal(x, lnϵ)[2]
+    dgdv = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
+    dvdu = pinv(V)*dfdu
+
+    nw = size(w,1)            # number of frequencies
+    ng = size(dgdx,1)         # number of outputs
+    nu = size(dfdu,2)         # number of inputs
+    nk = size(V,2)            # number of modes
+    S = zeros(Complex, nw, ng, nu)
+
+    for j = 1:nu
+        for i = 1:ng
+            for k = 1:nk
+                # transfer functions (FFT of kernel)
+                Sk = (1im*2*pi*w .- Λ[k]).^-1
+                S[:,i,j] .+= dgdv[i,k]*dvdu[k,j]*Sk
+            end
+        end
+    end
+    return S
+end
+
 
 function csd2mar(csd, w, dt, p)
     # TODO: investiagate why SymmetricToeplitz(ccf[1:p, i, j]) is not good to be used but instead need to use Toeplitz(ccf[1:p, i, j], ccf[1:p, j, i])
@@ -184,7 +237,7 @@ end
     Gn in the code corresponds to Ge in the paper, i.e. the observation noise. In the code global and local components are defined, no such distinction
     is discussed in the paper. In fact the parameter γ, corresponding to local component is not present in the paper.
 """
-function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
+function csd_approx(x, w, θμ, C, α::Vector, β, γ, lnϵ, lndecay, lntransit)
     # priors of spectral parameters
     # ln(α) and ln(β), region specific fluctuations: ln(γ)
     nw = length(w)
@@ -192,7 +245,7 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
 
     # define function that implements spectra given in equation (2) of the paper "A DCM for resting state fMRI".
 
-    # neuronal fluctuations (Gu) (1/f or AR(1) form)
+    # neuronal fluctuations, intrinsic noise (Gu) (1/f or AR(1) form)
     Gu = zeros(nw, nd, nd)
     Gn = zeros(nw, nd, nd)
     G = w.^(-exp(β[1]))    # spectrum of hidden dynamics
@@ -216,7 +269,7 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     end
     C = Matrix(I, nd, nd)     # here C is overwritten, whatever it was before, doesn't matter. This is SPM12 code, unclear how this makes sense.
 
-    S = transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)   # This is K(ω) in the equations of the spectral DCM paper.
+    S = transferfunction_fmri(x, w, θμ, C, lnϵ, lndecay, lntransit)   # This is K(ω) in the equations of the spectral DCM paper.
 
     # predicted cross-spectral density
     G = zeros(ComplexF64,nw,nd,nd);
@@ -226,6 +279,43 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
 
     return G + Gn
 end
+
+δ = Int∘==
+
+function csd_approx(f, x, w, θμ, C, α::Matrix, β, γ, lnϵ, lndecay, lntransit)
+    # priors of spectral parameters
+    # region specific neuronal noise ln(α), general measurement noise ln(β), region specific measurement noise: ln(γ)
+    nw = length(w)
+    nd = size(θμ, 1)
+
+    # define function that implements spectra given in equation (2) of the paper "A DCM for resting state fMRI".
+
+    # neuronal fluctuations, intrinsic noise (Gu) (1/f or AR(1) form)
+    Gu = zeros(nw, nd, nd)
+    Gn = zeros(nw, nd, nd)
+    for i = 1:nd
+        Gu[:, i, i] .+= exp(α[1, i]) .* w.^(-exp(α[2, i]))
+    end
+    # global components and region specific observation noise (1/f or AR(1) form)
+    for i = 1:nd
+        for j = i:nd
+            Gn[:,i,j] .+= (exp(β[1]) + δ(i,j)*exp(γ[i])) .* w.^(-exp(β[2])/2)
+            Gn[:,j,i] = Gn[:,i,j]
+        end
+    end
+    C = Matrix(I, nd, nd)     # here C is overwritten, whatever it was before, doesn't matter. This is SPM12 code, unclear how this makes sense.
+
+    S = transferfunction(f, x, w, θμ, C, lnϵ, lndecay, lntransit)   # This is K(ω) in the equations of the spectral DCM paper.
+
+    # predicted cross-spectral density
+    G = zeros(ComplexF64,nw,nd,nd);
+    for i = 1:nw
+        G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
+    end
+
+    return G + Gn
+end
+
 
 """
     Main function that computes the CSD: first arrange parameters, then call csd_approx which actually computes the CSD, and finally transform and back-transform to and from MAR.
@@ -250,6 +340,21 @@ function csd_fmri_mtf(x, freqs, p, param)   # alongside the above realtes to spm
     y = mar2csd(mar, freqs)
     return y
 end
+
+function csd_lfp_mtf(f, x, freqs, p, param)   # alongside the above realtes to spm_csd_fmri_mtf.m
+    dim = size(x, 1)
+    θμ = reshape(param[1:dim^2], dim, dim)
+    C = param[(1+dim^2):(dim+dim^2)]
+    lntransit = param[(1+dim+dim^2):(2dim+dim^2)]
+    lndecay = param[1+2dim+dim^2]
+    lnϵ = param[2+2dim+dim^2]
+    α = param[(3+2dim+dim^2):(2+2dim+2dim^2)]
+    β = param[(3+2dim+2dim^2):(4+2dim+2dim^2)]
+    γ = param[(5+2dim+2dim^2):(4+3dim+2dim^2)]
+    G = csd_approx(f, x, freqs, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
+    return G
+end
+
 
 function diff(U, dx, f, param)
     nJ = size(U, 2)
@@ -337,7 +442,13 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
 
     dx = exp(-8)
     revert = false
-    f_prep = param -> csd_fmri_mtf(x, w, p, param)
+    # f_prep = param -> csd_fmri_mtf(x, w, p, param)
+    regions = []
+    for i = 1:size(x, 1)
+        push!(regions, cmc(name=Symbol("r$i")))
+    end
+
+    f_prep = param -> csd_lfp_mtf(regions, x, w, p, param)
 
     # state variable
     F = -Inf
@@ -353,7 +464,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
 
         dfdp, f = diff(V, dx, f_prep, μθ);
         dfdp = transpose(reshape(dfdp, np, ny))
-        serialize("foo.bar", dfdp)
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
