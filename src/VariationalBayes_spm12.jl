@@ -8,10 +8,10 @@ ipC = Πθ_p   # precision matrix of prior of parameters p(θ)
 ihC = Πλ_p   # precision matrix of prior of hyperparameters p(λ)
 
 Variational distribution parameters:
-pE, Ep = θμ, μθ   # prior expectation of parameters (q(θ))
-pC, Cp = θΣ, Σθ   # prior covariance of parameters (q(θ))
-hE, Eh = λμ, μλ   # prior expectation of hyperparameters (q(λ))
-hC, Ch = λΣ, Σλ   # prior covariance of hyperparameters (q(λ))
+pE, Ep = θμ, μθ   # prior and posterior expectation of parameters (q(θ))
+pC, Cp = θΣ, Σθ   # prior and posterior covariance of parameters (q(θ))
+hE, Eh = λμ, μλ   # prior and posterior expectation of hyperparameters (q(λ))
+hC, Ch = λΣ, Σλ   # prior and posterior covariance of hyperparameters (q(λ))
 
 Σ, iΣ  # data covariance matrix (likelihood), and its inverse (precision of likelihood - use Π only for those precisions that don't change)
 Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)

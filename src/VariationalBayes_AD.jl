@@ -78,13 +78,13 @@ function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
         #                            Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
         # evecs = map((x,y)->Complex(Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(real(x), Partials(Tuple(real(y)))), 
         #                            Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
-        evals = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), 
-                                   Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
-        evecs = map((x,y)->Complex(Dual{T}(real(x), Partials(Tuple(real(y)))), 
-                                   Dual{T}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
+        evals = map((x,y)->Complex(Dual{T, Float64, length(y)}(real(x), Partials(Tuple(real(y)))), 
+                                   Dual{T, Float64, length(y)}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
+        evecs = map((x,y)->Complex(Dual{T, Float64, length(y)}(real(x), Partials(Tuple(real(y)))), 
+                                   Dual{T, Float64, length(y)}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
     else
-        evals = Dual{T}(F.values, ∂λ)
-        evecs = Dual{T}(F.vectors, ∂V)
+        evals = Dual{T, Float64, length(∂λ[1])}.(F.values, ∂λ)
+        evecs = Dual{T, Float64, length(∂V[1])}.(F.vectors, ∂V)
     end
     return Eigen(evals, evecs)
 end
@@ -127,8 +127,12 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     ng = size(dgdx,1)         # number of outputs
     nu = size(dfdu,2)         # number of inputs
     nk = size(V,2)            # number of modes
-    S = zeros(eltype(dvdu), nw, ng, nu)
-
+    # if real(eltype(dvdu)) <: Dual
+    #     S = zeros(Dual{tagtype(real(dvdu[1])), ComplexF64, length(real(dvdu[1]).partials)}, nw, ng, nu)    
+    # else
+    S = zeros(Complex{real(eltype(dvdu))}, nw, ng, nu)
+    # end
+    Main.foo[] = S, dvdu, dgdv, Sk, Λ, w, i,j,k
     for j = 1:nu
         for i = 1:ng
             for k = 1:nk
