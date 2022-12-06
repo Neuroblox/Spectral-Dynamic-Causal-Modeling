@@ -76,7 +76,7 @@ end
 
 local vals
 for n = 2:8
-    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/data_speedtest/nregions" * string(n) *".mat");
+    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions" * string(n) *".mat");
     include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
     wrapperfunction(vals, 1)
     t_juliaAD = @elapsed res_AD = wrapperfunction(vals, 128)
@@ -95,7 +95,7 @@ for n = 2:8
     ); compress = true)    
 end
 
-file = matopen("data_speedtest/nregions" * n * ".mat")
+file = matopen("speedandaccuracy/nregions" * n * ".mat")
 t_matlab = read(file, "matcomptime")
 close(file)
 iter = 20

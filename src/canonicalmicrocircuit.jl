@@ -8,27 +8,30 @@
 using ModelingToolkit
 using MetaGraphs
 using Graphs
+using Random
+using Plots
 
 @parameters t
 D = Differential(t)
 
 # define a sigmoid function
-sigmoid(x::Real, r::Vector{Float64}) = one(x) / (one(x) + exp(-2.0/3.0*exp(r[2])*x + r[1]))
+sigmoid(x::Real, r) = @show typeof(r) #one(x) / (one(x) + exp(-2.0/3.0*exp(r[2])*x + r[1]))
 
 """
 Jansen-Rit model block for canonical micro circuit, analogous to the implementation in SPM12
 """
 mutable struct jansen_rit_spm12
     τ::Num
-    r::Vector{Float64}
+    r::Num
     connector::Num
     odesystem::ODESystem
     function jansen_rit_spm12(;name, τ=0.0, r=[0.0, 0.0])
-        params = @parameters τ=τ
+        params = @parameters τ=τ r[1:2]=r
         sts    = @variables x(t)=1.0 y(t)=1.0 jcn(t)=0.0
         eqs    = [D(x) ~ y - ((2/τ)*x),
                   D(y) ~ -x/(τ*τ) + jcn/τ]
         odesys = ODESystem(eqs, t, sts, params; name=name)
+        @show typeof(r), typeof(τ), typeof(odesys.r)
         new(τ, r, sigmoid(odesys.x, r), odesys)
     end
 end
@@ -134,6 +137,13 @@ function connectcomplexblox(bloxlist, adjacency_matrices ;name)
     return ODEfromGraph(g, name=name)
 end
 
+regions = []
+nr = 2
+for i = 1:nr
+    push!(regions, cmc(name=Symbol("r$i")))
+end
+
+
 A = Array{Matrix{Float64}}(undef, nr, nr);
 Random.seed!(1234)
 for i = 1:nr
@@ -146,3 +156,6 @@ for i = 1:nr
 end
 @named manyregions = connectcomplexblox(regions, A)
 manyregions = structural_simplify(manyregions)
+prob = ODEProblem(manyregions, zeros(length(manyregions.states)), (0,1), [])
+sol = solve(prob, AutoVern7(Rodas4()))
+plot(sol)

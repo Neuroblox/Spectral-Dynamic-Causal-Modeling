@@ -445,7 +445,7 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
     # f_prep = param -> csd_fmri_mtf(x, w, p, param)
     regions = []
     for i = 1:size(x, 1)
-        push!(regions, cmc(name=Symbol("r$i")))
+        push!(regions, cmc(name=Symbol("r$i"), r=param[2:6]))
     end
 
     f_prep = param -> csd_lfp_mtf(regions, x, w, p, param)
