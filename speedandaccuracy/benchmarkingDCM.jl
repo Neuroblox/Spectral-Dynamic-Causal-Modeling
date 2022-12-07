@@ -12,8 +12,11 @@ using MAT
 using ExponentialUtilities
 using ForwardDiff
 
+using Turing
+using Distributions
+
 ### a few packages relevant for speed tests and profiling ###
-# using Serialization
+using Serialization
 
 
 # simple dispatch for vec to deal with 1xN matrices
@@ -23,6 +26,7 @@ end
 
 include("../src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
 include("../src/mar.jl")                      # multivariate auto-regressive model functions
+include("../src/VariationalBayes_AD.jl")
 
 function wrapperfunction(vars, iter)
     y = vars["data"];
@@ -74,34 +78,93 @@ function wrapperfunction(vars, iter)
     return results
 end
 
-local vals
-for n = 2:8
-    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions" * string(n) *".mat");
-    include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-    wrapperfunction(vals, 1)
-    t_juliaAD = @elapsed res_AD = wrapperfunction(vals, 128)
-    include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-    wrapperfunction(vals, 1)
-    t_juliaSPM = @elapsed res_spm = wrapperfunction(vals, 128)
-    @show t_juliaAD, t_juliaSPM
-
-    matwrite("speedandaccuracy/n" * string(n) * ".mat", Dict(
-        "t_mat" => vals["matcomptime"],
-        "F_mat" => vals["F"],
-        "t_jad" => t_juliaAD,
-        "F_jad" => res_AD.F,
-        "t_jspm" => t_juliaSPM,
-        "F_jspm" => res_spm.F,
-    ); compress = true)    
+function wrapperfunction_ADVI(vars)
+    y = vars["data"];
+    dt = vars["dt"];
+    w = vec(vars["Hz"]);
+    p = 8;
+    mar = mar_ml(y, p);
+    y_csd = mar2csd(mar, w, dt^-1);
+    x = vars["x"];           # initial condition of dynamic variabls
+    dim = size(x, 1);        
+    
+    @model function fitADVI_csd(csd_data)
+        # set priors of variable parameters
+        # Σ ~ InverseWishart(σ_μ, σ_σ)
+        # define all priors of parameters
+        α ~ MvNormal([0.0, 0.0], Matrix(I, 2, 2))
+        β1 ~ Uniform(0.0, 2.0)
+        β2 ~ Uniform(0.0, 2.0)
+        γ ~ MvNormal(zeros(dim), Matrix(I, dim, dim))
+        lnϵ ~ Normal(0.0, 1.0)
+        lndecay ~ Normal(0.0, 1.0)
+        lntransit ~ MvNormal(zeros(dim), Matrix(I, dim, dim))
+        A ~ MvNormal(reshape(vars["pE"]["A"], dim^2), vars["pC"][1:dim, 1:dim])
+        C = zeros(dim);    # NB: whatever C is defined to be here, it will be replaced in csd_approx. A little strange thing of SPM12
+        # compute cross spectral density
+        param = [A; C; lntransit; lndecay; lnϵ; α[1]; β1; α[2]; β2; γ];
+        # observations
+        csd = csd_fmri_mtf(x, w, p, param)
+        if eltype(csd) <: Dual
+            csd = (p->p.value).(csd)
+        end
+    
+        csd_real = real(vec(csd_data))
+        csd_imag = imag(vec(csd_data))
+        csd_real ~ MvNormal(real(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
+        csd_imag ~ MvNormal(imag(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
+    end
+    
+    # ADVI
+    modelEMn = fitADVI_csd(y_csd)
+    Turing.setadbackend(:forwarddiff)
+    advi = ADVI(10, 1000)
+    setchunksize(8)
+    q = vi(modelEMn, advi);
+    return q
 end
 
-file = matopen("speedandaccuracy/nregions" * n * ".mat")
-t_matlab = read(file, "matcomptime")
-close(file)
-iter = 20
+local vals
+for n = 4:8
+    @show n
+    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions" * string(n) *".mat");
+    include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+    t_juliaADVI = @elapsed q = wrapperfunction_ADVI(vals)
+    serialize("ADVIsaved" * string(n), (q, t_juliaADVI))
+end
+
+z = rand(q,1000);
+avg = vec(mean(z; dims = 2))
+A_true = [0 0.0079 -0.0062; 0.0341 0 0.0054; 0.0115 -0.0058 0]
+fitqual = reshape(avg[13:21], 3, 3) - A_true
+
+# for n = 2:8
+#     vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions" * string(n) *".mat");
+#     include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+#     wrapperfunction(vals, 1)
+#     t_juliaAD = @elapsed res_AD = wrapperfunction(vals, 128)
+#     include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+#     wrapperfunction(vals, 1)
+#     t_juliaSPM = @elapsed res_spm = wrapperfunction(vals, 128)
+#     @show t_juliaAD, t_juliaSPM
+
+#     matwrite("speedandaccuracy/n" * string(n) * ".mat", Dict(
+#         "t_mat" => vals["matcomptime"],
+#         "F_mat" => vals["F"],
+#         "t_jad" => t_juliaAD,
+#         "F_jad" => res_AD.F,
+#         "t_jspm" => t_juliaSPM,
+#         "F_jspm" => res_spm.F,
+#     ); compress = true)    
+# end
+
+# file = matopen("speedandaccuracy/nregions" * n * ".mat")
+# t_matlab = read(file, "matcomptime")
+# close(file)
+# iter = 20
 
 
-### Speedtest - note that the above then needs to be defined within a function ###
-# speedtest(vars)
-ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
-@profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)
+# ### Speedtest - note that the above then needs to be defined within a function ###
+# # speedtest(vars)
+# ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
+# @profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)

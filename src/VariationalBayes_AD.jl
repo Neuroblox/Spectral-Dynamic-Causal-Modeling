@@ -132,7 +132,6 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # else
     S = zeros(Complex{real(eltype(dvdu))}, nw, ng, nu)
     # end
-    Main.foo[] = S, dvdu, dgdv, Sk, Λ, w, i,j,k
     for j = 1:nu
         for i = 1:ng
             for k = 1:nk
