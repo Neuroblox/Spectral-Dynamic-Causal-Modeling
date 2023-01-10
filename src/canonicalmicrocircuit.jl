@@ -15,7 +15,7 @@ using Plots
 D = Differential(t)
 
 # define a sigmoid function
-sigmoid(x::Real, r) = @show typeof(r) #one(x) / (one(x) + exp(-2.0/3.0*exp(r[2])*x + r[1]))
+sigmoid(x::Real, r) = one(x) / (one(x) + exp(-2.0/3.0*exp(r[2])*x + r[1]))
 
 """
 Jansen-Rit model block for canonical micro circuit, analogous to the implementation in SPM12
@@ -25,12 +25,13 @@ mutable struct jansen_rit_spm12
     r::Num
     connector::Num
     odesystem::ODESystem
-    function jansen_rit_spm12(;name, τ=0.0, r=[0.0, 0.0])
-        params = @parameters τ=τ r[1:2]=r
+    function jansen_rit_spm12(;name, τ_init=0.0, r_init=[0.0, 0.0])
+        params = @parameters τ=τ_init r
         sts    = @variables x(t)=1.0 y(t)=1.0 jcn(t)=0.0
         eqs    = [D(x) ~ y - ((2/τ)*x),
                   D(y) ~ -x/(τ*τ) + jcn/τ]
-        odesys = ODESystem(eqs, t, sts, params; name=name)
+        @show typeof(r), typeof(τ)
+        odesys = ODESystem(eqs, t, sts, params; name=name, defaults=Dict(τ=>τ_init, r=>r_init))
         @show typeof(r), typeof(τ), typeof(odesys.r)
         new(τ, r, sigmoid(odesys.x, r), odesys)
     end
@@ -68,8 +69,8 @@ mutable struct cmc
     r::Vector{Num}
     odesystem::ODESystem
     lngraph::MetaDiGraph
-    function cmc(;name, τ=[0.002, 0.002, 0.016, 0.028], r=[[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]])
-        ss = jansen_rit_spm12(τ=τ[1], r=r[1], name=Symbol(String(name)*"_ss"))  # spiny stellate
+    function cmc(;name, τ=[0.002, 0.002, 0.016, 0.028], r=[[1.0, 2.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]])
+        ss = jansen_rit_spm12(τ=τ[1], r1=r[1], r2=r[2], name=Symbol(String(name)*"_ss"))  # spiny stellate
         sp = jansen_rit_spm12(τ=τ[2], r=r[2], name=Symbol(String(name)*"_sp"))  # superficial pyramidal
         ii = jansen_rit_spm12(τ=τ[3], r=r[3], name=Symbol(String(name)*"_ii"))  # inhibitory interneurons granular layer
         dp = jansen_rit_spm12(τ=τ[4], r=r[4], name=Symbol(String(name)*"_dp"))  # deep pyramidal

@@ -1,6 +1,7 @@
 using LinearAlgebra: I, Matrix
-using ForwardDiff: Dual
+using ForwardDiff: Dual, Partials
 using FFTW
+using ProfileView
 
 function dft(x::AbstractArray)
     """discrete fourier transform"""
@@ -15,12 +16,58 @@ end
 function idft(x::AbstractArray)
     """discrete inverse fourier transform"""
     N = size(x)[1]
-    out = Array{ComplexF64}(undef,N)
+    out = Array{eltype(x)}(undef,N)
     for n in 0:N-1
         out[n+1] = 1/N*sum([x[k+1]*exp(2*im*π*k*n/N) for k in 0:N-1])
     end
     return out
 end
+
+function idft(x::AbstractArray)
+    """discrete inverse fourier transform"""
+    N = size(x)[1]
+    out = Array{Complex{eltype(x)}}(undef,N)
+    for n in 0:N-1
+        out[n+1] = 1/N*sum([x[k+1]*exp(2*im*π*k*n/N) for k in 0:N-1])
+    end
+    return out
+end
+
+function FFTW.ifft(x::Array{Complex{Dual{T, P, N}}}) where {T, P, N}
+    return ifft(real(x)) + 1im * ifft(imag(x))
+end
+
+function FFTW.ifft(x::Array{Dual{T, P, N}}) where {T, P, N}
+    v = (tmp->tmp.value).(x)
+    iftx = ifft(v)
+    iftrp = Array{Partials}(undef, length(x))
+    iftip = Array{Partials}(undef, length(x))
+    local iftrp_agg, iftip_agg
+    for i = 1:N
+        dx = (tmp->tmp.partials[i]).(x)
+        iftdx = ifft(dx)
+        if i == 1
+            iftrp_agg = real(iftdx) .* dx
+            iftip_agg = imag(iftdx) .* dx
+        else
+            iftrp_agg = cat(iftrp_agg, real(iftdx) .* dx, dims=2)
+            iftip_agg = cat(iftip_agg, imag(iftdx) .* dx, dims=2)
+        end
+    end
+    for i = 1:length(x)
+        iftrp[i] = Partials(Tuple(iftrp_agg[i, :]))
+        iftip[i] = Partials(Tuple(iftip_agg[i, :]))
+    end
+    return Complex.(Dual{T, P, N}.(real(iftx), iftrp), Dual{T, P, N}.(imag(iftx), iftip))
+end
+foo = Ref{Any}()
+x = deserialize("deleteme.dat")
+x = Dual.(rand(10), Partials.(Tuple.(rand(10))))
+@time idft(x);
+@time ifft(x);
+FFTW.ifft(foo[]) ≈ idft(foo[])
+
+@profilehtml ifft(x)
 
 
 # My own toy model for ADing a CSD computation based on MARs

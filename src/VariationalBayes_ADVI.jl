@@ -71,7 +71,7 @@ end
 # ADVI
 modelEMn = fitADVI_csd(y_csd)
 Turing.setadbackend(:forwarddiff)
-advi = ADVI(50, 1000)
+advi = ADVI(10, 1000)
 setchunksize(8)
 q = vi(modelEMn, advi);
 

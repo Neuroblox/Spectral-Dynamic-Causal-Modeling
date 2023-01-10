@@ -21,7 +21,7 @@ mar.noise_cov  Estimated noise covariance
 mar.fm         Free energy of model
 mar.wmean      MAR coefficients stored in a matrix
 y              Target values
-y_pred         Predicted values ___________________________________________________________________________
+y_pred         Predicted values
 """
 function estimate_mar(X, p, prior)
 

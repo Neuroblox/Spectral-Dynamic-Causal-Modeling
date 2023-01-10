@@ -18,14 +18,14 @@ include("src/mar.jl")                      # multivariate auto-regressive model 
 
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/spectralDCM_demodata.mat");
+vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_3regions.mat");
 y = vars["data"];
 dt = vars["dt"];
 freqs = vec(vars["Hz"]);
 p = 8;                               # order of MAR, it is hard-coded in SPM12 with this value. We will just use the same for now.
-# mar = mar_ml(y, p);                  # compute MAR from time series y and model order p
-# y_csd = mar2csd(mar, freqs, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
-y_csd = vars["data_csd"][1]
+mar = mar_ml(y, p);                  # compute MAR from time series y and model order p
+y_csd = mar2csd(mar, freqs, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
+# y_csd = vars["data_csd"][1]
 ### Define priors and initial conditions ###
 x = vars["x"];                       # initial condition of dynamic variabls
 A = vars["pE"]["A"];                 # initial values of connectivity matrix
@@ -58,11 +58,11 @@ lnγ = zeros(Float64, dim);        # region specific observation noise parameter
 lnϵ = 0.0;                        # BOLD signal parameter
 lndecay = 0.0;                    # hemodynamic parameter
 lntransit = zeros(Float64, dim);  # hemodynamic parameters
-# param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; lnα[1]; lnβ[1]; lnα[2]; lnβ[2]; lnγ;];
-param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; reshape(lnα, dim^2); lnβ; lnγ;];
+param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; lnα[1]; lnβ[1]; lnα[2]; lnβ[2]; lnγ;];
+# param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; reshape(lnα, dim^2); lnβ; lnγ;];
 # Strange α and β sorting? yes. This is to be consistent with the SPM12 code while keeping nomenclature consistent with the spectral DCM paper
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 priors = [Πθ_p, Πλ_p, λμ, Q];
-
+foo = Ref{Any}()
 ### Compute the DCM ###
-results = variationalbayes(x, y_csd, freqs, V, param, priors, 30)
+@time results = variationalbayes(x, y_csd, freqs, V, param, priors, 128)

@@ -28,6 +28,7 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 using LinearAlgebra: Eigen
 using ForwardDiff: Dual
 using ForwardDiff: Partials
+using FFTW: ifft
 # using SparseDiffTools
 ForwardDiff.can_dual(::Type{Complex{Float64}}) = true
 using ChainRules: _eigen_norm_phase_fwd!
@@ -37,7 +38,45 @@ tagtype(::Dual{T,V,N}) where {T,V,N} = T
 
 # Base.eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
 # Base.signbit(x::Complex{T}) where {T<:AbstractFloat} = real(x) < 0
-struct NeurobloxTag end
+# struct NeurobloxTag end
+
+function idft(x::AbstractArray)
+    """discrete inverse fourier transform"""
+    N = size(x)[1]
+    out = Array{eltype(x)}(undef,N)
+    for n in 0:N-1
+        out[n+1] = 1/N*sum([x[k+1]*exp(2*im*π*k*n/N) for k in 0:N-1])
+    end
+    return out
+end
+
+function FFTW.ifft(x::Array{Complex{Dual{T, P, N}}}) where {T, P, N}
+    return ifft(real(x)) + 1im*ifft(imag(x))
+end
+
+function FFTW.ifft(x::Array{Dual{T, P, N}}) where {T, P, N}
+    v = (tmp->tmp.value).(x)
+    iftx = ifft(v)
+    iftrp = Array{Partials}(undef, length(x))
+    iftip = Array{Partials}(undef, length(x))
+    local iftrp_agg, iftip_agg
+    for i = 1:N
+        dx = (tmp->tmp.partials[i]).(x)
+        iftdx = ifft(dx)
+        if i == 1
+            iftrp_agg = real(iftdx) .* dx
+            iftip_agg = (1im * imag(iftdx)) .* dx
+        else
+            iftrp_agg = cat(iftrp_agg, real(iftdx) .* dx, dims=2)
+            iftip_agg = cat(iftip_agg, (1im * imag(iftdx)) .* dx, dims=2)
+        end
+    end
+    for i = 1:length(x)
+        iftrp[i] = Partials(Tuple(iftrp_agg[i, :]))
+        iftip[i] = Partials(Tuple(iftip_agg[i, :]))
+    end
+    return Complex.(Dual{T, P, N}.(real(iftx), iftrp), Dual{T, P, N}.(imag(iftx), iftip))
+end
 
 function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
     nd = size(M, 1)
@@ -74,10 +113,6 @@ function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
         end
     end
     if eltype(V) <: Complex
-        # evals = map((x,y)->Complex(Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(real(x), Partials(Tuple(real(y)))), 
-        #                            Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
-        # evecs = map((x,y)->Complex(Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(real(x), Partials(Tuple(real(y)))), 
-        #                            Dual{ForwardDiff.Tag(NeurobloxTag(), Float64),Float64,length(y)}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
         evals = map((x,y)->Complex(Dual{T, Float64, length(y)}(real(x), Partials(Tuple(real(y)))), 
                                    Dual{T, Float64, length(y)}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
         evecs = map((x,y)->Complex(Dual{T, Float64, length(y)}(real(x), Partials(Tuple(real(y)))), 
@@ -120,7 +155,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian... it isn't! if anything it should be a gradient since the BOLD signal is scalar
     #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
     dgdx = boldsignal(x, lnϵ)[2]
-    dgdv = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
+    dgdv = dgdx * @view V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
     dvdu = V\dfdu
 
     nw = size(w,1)            # number of frequencies
@@ -141,23 +176,9 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
             end
         end
     end
+    Main.transfervars[] = J_tot, F, S, dgdv, dvdu
     return S
 end
-
-function idft(x::AbstractArray)
-    """discrete inverse fourier transform"""
-    N = size(x)[1]
-    out = Array{eltype(x)}(undef,N)
-    for n in 0:N-1
-        out[n+1] = 1/N*sum([x[k+1]*exp(2*im*π*k*n/N) for k in 0:N-1])
-    end
-    return out
-end
-
-# function fftshift(x, dim = 1:ndims(x))
-#     s = ntuple(d -> d in dim ? div(size(x,d),2) : 0, Val(ndims(x)))
-#     circshift(x, s)
-# end
 
 function csd2mar(csd, w, dt, p)
     # TODO: investiagate why SymmetricToeplitz(ccf[1:p, i, j]) is not good to be used but instead need to use Toeplitz(ccf[1:p, i, j], ccf[1:p, j, i])
@@ -194,6 +215,7 @@ function csd2mar(csd, w, dt, p)
     for i = 1:m
         for j = 1:m
             A[((i-1)*p+1):i*p, j] = ccf[(1:p) .+ 1, i, j]
+            Main.csd2marvars[] = ccf, csd
             B[((i-1)*p+1):i*p, ((j-1)*p+1):j*p] = Toeplitz(ccf[1:p, i, j], vcat(ccf[1,i,j], ccf[2:p, j, i]))  # SymmetricToeplitz(ccf[1:p, i, j])
         end
     end
@@ -246,7 +268,7 @@ function mar2csd(mar, freqs)
     return csd
 end
 
-function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
+@views function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
     # priors of spectral parameters
     # ln(α) and ln(β), region specific fluctuations: ln(γ)
     nw = length(w)
@@ -285,10 +307,11 @@ function csd_approx(x, w, θμ, C, α, β, γ, lnϵ, lndecay, lntransit)
         G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
     end
     G_final = G + Gn
+    Main.csdapproxvars[] = G, Gn, S, Gu
     return G_final
 end
 
-function csd_fmri_mtf(x, freqs, p, param)
+@views function csd_fmri_mtf(x, freqs, p, param)
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
     C = param[(1+dim^2):(dim+dim^2)]
@@ -310,17 +333,6 @@ function csd_fmri_mtf(x, freqs, p, param)
     return y
 end
 
-function diff(U, dx, f, param)
-    nJ = size(U, 2)
-    y0 = f(param)
-    J = zeros(ComplexF64, nJ, size(y0, 1), size(y0, 2), size(y0, 3))
-    for i = 1:nJ
-        tmp_param = param .+ U[:, i]*dx
-        y1 = f(tmp_param)
-        J[i,:,:,:] = (y1 .- y0)/dx
-    end
-    return J, y0
-end
 
 function matlab_norm(A, p)
     if p == 1
@@ -374,7 +386,7 @@ mutable struct vb_state
     Σθ::Matrix{Float64}
 end
 
-function variationalbayes(x, y, w, V, param, priors, niter)
+@views function variationalbayes(x, y, w, V, param, priors, niter)
     # extract priors
     Πθ_p = priors[1]
     Πλ_p = priors[2]
