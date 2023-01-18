@@ -176,7 +176,6 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
             end
         end
     end
-    Main.transfervars[] = J_tot, F, S, dgdv, dvdu
     return S
 end
 
@@ -215,7 +214,6 @@ function csd2mar(csd, w, dt, p)
     for i = 1:m
         for j = 1:m
             A[((i-1)*p+1):i*p, j] = ccf[(1:p) .+ 1, i, j]
-            Main.csd2marvars[] = ccf, csd
             B[((i-1)*p+1):i*p, ((j-1)*p+1):j*p] = Toeplitz(ccf[1:p, i, j], vcat(ccf[1,i,j], ccf[2:p, j, i]))  # SymmetricToeplitz(ccf[1:p, i, j])
         end
     end
@@ -307,7 +305,6 @@ end
         G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
     end
     G_final = G + Gn
-    Main.csdapproxvars[] = G, Gn, S, Gu
     return G_final
 end
 
