@@ -78,7 +78,7 @@ end
 u0 = [0.0;0.0;0.0;0.0]
 tspan = (0.0,10.0)
 p = [0.1, 0.0, 0.0]
-prob = ODEProblem(hemodynamics!, u0, tspan, p)
+prob = ODEProblem(hemodynamics!, u0, tspan, p, solver = AutoVern7(Rodas4()))
 sol = solve(prob)
 
 plot(sol)
