@@ -144,9 +144,6 @@ local vals
 n = 3
 for iter = 3:5
     vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
-n = 3
-for iter = 3:5
-    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
     t_juliaADVI = @elapsed (q, advi, model) = wrapperfunction_ADVI(vals, ADVIsamples, ADVIsteps)
     serialize("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(n) * ".dat", (q, advi, model, t_juliaADVI))
 end
@@ -179,7 +176,6 @@ q = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamp
 X = []
 Yj = []
 Yj_total = []
-Yj_total = []
 Ym = []
 Yt = []
 for i = 1:d
@@ -188,14 +184,11 @@ for i = 1:d
             continue
         end
         push!(X, "a_$i$j")
-        push!(X, "a_$i$j")
         push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
         push!(Ym, vals["Ep"]["A"][i, j])
         push!(Yt, A_true[i, j])
     end
 end
-push!(Yj_total, Yj)
-scatter(X, Yj, label="ADVI", widen=2,color=:orange, markeralpha=0.3)
 push!(Yj_total, Yj)
 scatter(X, Yj, label="ADVI", widen=2,color=:orange, markeralpha=0.3)
 for iter = 2:5
@@ -211,13 +204,7 @@ for iter = 2:5
     end
     scatter!(X, Yj, label=false, color=:orange, markeralpha=0.3)
     push!(Yj_total, Yj)
-    scatter!(X, Yj, label=false, color=:orange, markeralpha=0.3)
-    push!(Yj_total, Yj)
 end
-scatter!(X, Ym, label="Laplace", color=:blue)
-scatter!(X, Yt, label="True", wide=2, legend=:best, color=:red, markershape=:star5, ylabel="interaction strength")
-scatter!(X, mean(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)
-title!("standard deviation of interaction = 0.01\n ADVI samples = " * string(ADVIsamples) * ", steps =" * string(ADVIsteps) * ", regions = " * string(r))
 scatter!(X, Ym, label="Laplace", color=:blue)
 scatter!(X, Yt, label="True", wide=2, legend=:best, color=:red, markershape=:star5, ylabel="interaction strength")
 scatter!(X, mean(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)
