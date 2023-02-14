@@ -7,6 +7,7 @@
 # - 
 using ModelingToolkit
 using DifferentialEquations
+using DifferentialEquations
 using MetaGraphs
 using Graphs
 using Random
@@ -161,7 +162,6 @@ prob = ODEProblem(manyregions, zeros(length(manyregions.states)), (0,1), [])
 sol = solve(prob, AutoVern7(Rodas4()))
 plot(sol)
 
-manyregions
 
 
 @variables t x(t)   # independent and dependent variables
@@ -187,3 +187,12 @@ sol = solve(prob)
 using Plots
 plot(sol)
 
+params = @parameters τ r
+sts    = @variables x(t)=1.0 y(t)=1.0 jcn(t)=0.0
+eqs    = [D(x) ~ y - ((2/τ)*x),
+          D(y) ~ -x/(τ*τ) + jcn/τ]
+@named odesys = ODESystem(eqs, t, sts, params; defaults=Dict(τ=>0.0, r=>[0.0, 0.5]))
+odesys = structural_simplify(odesys)
+prob = ODEProblem(odesys, zeros(length(odesys.states)), (0, 1), [])
+
+remake(prob)

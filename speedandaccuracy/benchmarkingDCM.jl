@@ -17,6 +17,8 @@ using Distributions
 
 using Flux
 
+using Flux
+
 ### a few packages relevant for speed tests and profiling ###
 using Serialization
 
@@ -91,6 +93,7 @@ function wrapperfunction_ADVI(vars, samples, steps)
     dim = size(x, 1);
     Σ = vars["pC"]
 
+
     @model function fitADVI_csd(csd_data)
         # set priors of variable parameters
         # Σ ~ InverseWishart(σ_μ, σ_σ)
@@ -117,11 +120,13 @@ function wrapperfunction_ADVI(vars, samples, steps)
             csd = (p->p.value).(csd)
         end
 
+
         csd_real = real(vec(csd_data))
         csd_imag = imag(vec(csd_data))
         csd_real ~ MvNormal(real(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
         csd_imag ~ MvNormal(imag(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
     end
+
 
     # ADVI
     modelEMn = fitADVI_csd(y_csd)
@@ -136,6 +141,9 @@ csdapproxvars = Ref{Any}()
 ADVIsteps = 1000
 ADVIsamples = 10
 local vals
+n = 3
+for iter = 3:5
+    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
 n = 3
 for iter = 3:5
     vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
@@ -171,6 +179,7 @@ q = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamp
 X = []
 Yj = []
 Yj_total = []
+Yj_total = []
 Ym = []
 Yt = []
 for i = 1:d
@@ -179,11 +188,14 @@ for i = 1:d
             continue
         end
         push!(X, "a_$i$j")
+        push!(X, "a_$i$j")
         push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
         push!(Ym, vals["Ep"]["A"][i, j])
         push!(Yt, A_true[i, j])
     end
 end
+push!(Yj_total, Yj)
+scatter(X, Yj, label="ADVI", widen=2,color=:orange, markeralpha=0.3)
 push!(Yj_total, Yj)
 scatter(X, Yj, label="ADVI", widen=2,color=:orange, markeralpha=0.3)
 for iter = 2:5
@@ -199,7 +211,13 @@ for iter = 2:5
     end
     scatter!(X, Yj, label=false, color=:orange, markeralpha=0.3)
     push!(Yj_total, Yj)
+    scatter!(X, Yj, label=false, color=:orange, markeralpha=0.3)
+    push!(Yj_total, Yj)
 end
+scatter!(X, Ym, label="Laplace", color=:blue)
+scatter!(X, Yt, label="True", wide=2, legend=:best, color=:red, markershape=:star5, ylabel="interaction strength")
+scatter!(X, mean(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)
+title!("standard deviation of interaction = 0.01\n ADVI samples = " * string(ADVIsamples) * ", steps =" * string(ADVIsteps) * ", regions = " * string(r))
 scatter!(X, Ym, label="Laplace", color=:blue)
 scatter!(X, Yt, label="True", wide=2, legend=:best, color=:red, markershape=:star5, ylabel="interaction strength")
 scatter!(X, mean(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)

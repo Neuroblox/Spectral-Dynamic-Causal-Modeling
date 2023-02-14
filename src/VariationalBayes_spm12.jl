@@ -1,3 +1,5 @@
+using ModelingToolkit
+
 """
 #= Define notational equivalences between SPM12 and this code:
 
@@ -61,6 +63,51 @@ function transferfunction_fmri(x, w, θμ, C, lnϵ, lndecay, lntransit)   # rela
     # else
     #     s = 1j*imag(s) + min(real(s),-1/32);
     # end
+
+    # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
+    #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
+    dgdx = boldsignal(x, lnϵ)[2]
+    dgdv = dgdx*V[end-size(dgdx,2)+1:end, :]     # TODO: not a clean solution, also not in the original code since it seems that the code really depends on the ordering of eigenvalues and respectively eigenvectors!
+    dvdu = pinv(V)*dfdu
+
+    nw = size(w,1)            # number of frequencies
+    ng = size(dgdx,1)         # number of outputs
+    nu = size(dfdu,2)         # number of inputs
+    nk = size(V,2)            # number of modes
+    S = zeros(Complex, nw, ng, nu)
+
+    for j = 1:nu
+        for i = 1:ng
+            for k = 1:nk
+                # transfer functions (FFT of kernel)
+                Sk = (1im*2*pi*w .- Λ[k]).^-1    # TODO: clean up 1im*2*pi*freq instead of omega to be consistent with the usual nomenclature
+                S[:,i,j] .+= dgdv[i,k]*dvdu[k,j]*Sk
+            end
+        end
+    end
+    return S
+end
+
+function transferfunction_fmrinew(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates to: spm_dcm_mtf.m
+    # compute transfer function of Volterra kernels, see fig 1 in friston2014 (spectral DCM paper)
+    # 1. compute jacobian w.r.t. f ; TODO: what is it with this "delay operator" that is set to 1 in "spm_fx_fmri.m"
+    # J_x = jacobian(f, x0) # well, no need to perform this for a linear system... we already have it: θμ
+    C /= 16.0   # TODO: unclear why C is devided by 16 but see spm_fx_fmri.m:49
+    # 2. get jacobian of hemodynamics
+    dx = similar(x[:, 2:end])
+    J = hemodynamics!(dx, x[:, 2:end], x[:, 1], lndecay, lntransit)[2]
+    θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
+    # if I eventually need also the change of variables rather than just the derivative then here is where to fix it!
+    nd = size(θμ, 1)
+    J_tot = [θμ zeros(nd, size(J, 2));   # add derivatives w.r.t. neural signal; this is the total Jacobian of the underlying dynamics ∂ₓf in the paper
+            [Matrix(1.0I, size(θμ)); zeros(size(J)[1]-nd, size(θμ)[2])] J]
+
+    dfdu = [C; 
+            zeros(size(J,1), size(C, 2))]
+
+    F = eigen(J_tot, sortby=nothing, permute=true)
+    Λ = F.values
+    V = F.vectors
 
     # 3. get jacobian (??) of bold signal, just compute it as is done, but how is this a jacobian, it isn't! if anything it should be a gradient since the BOLD signal is scalar
     #TODO: implement numerical and compare with analytical: J_g = jacobian(bold, x0)
@@ -269,7 +316,7 @@ function csd_approx(x, w, θμ, C, α::Vector, β, γ, lnϵ, lndecay, lntransit)
     end
     C = Matrix(I, nd, nd)     # here C is overwritten, whatever it was before, doesn't matter. This is SPM12 code, unclear how this makes sense.
 
-    S = transferfunction_fmri(x, w, θμ, C, lnϵ, lndecay, lntransit)   # This is K(ω) in the equations of the spectral DCM paper.
+    S = transferfunction_fmrinew(x, w, θμ, C, lnϵ, lndecay, lntransit)   # This is K(ω) in the equations of the spectral DCM paper.
 
     # predicted cross-spectral density
     G = zeros(ComplexF64,nw,nd,nd);
@@ -442,13 +489,13 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
 
     dx = exp(-8)
     revert = false
-    # f_prep = param -> csd_fmri_mtf(x, w, p, param)
-    regions = []
-    for i = 1:size(x, 1)
-        push!(regions, cmc(name=Symbol("r$i"), r=param[2:6]))
-    end
+    f_prep = param -> csd_fmri_mtf(x, w, p, param)
+    # regions = []
+    # for i = 1:size(x, 1)
+    #     push!(regions, cmc(name=Symbol("r$i"), r=param[2:6]))
+    # end
 
-    f_prep = param -> csd_lfp_mtf(regions, x, w, p, param)
+    # f_prep = param -> csd_lfp_mtf(regions, x, w, p, param)
 
     # state variable
     F = -Inf
@@ -608,5 +655,6 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
     state.F = F
     state.Σθ = V*Σθ*V'
     state.μθ = μθ
+    @show dx
     return state
 end

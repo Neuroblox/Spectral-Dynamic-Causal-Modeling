@@ -13,7 +13,7 @@ function Base.vec(x::T) where (T <: Real)
 end
 
 include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                      # multivariate auto-regressive model functions
 
 
@@ -63,6 +63,6 @@ param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; lnα[1]; lnβ[1]; ln
 # Strange α and β sorting? yes. This is to be consistent with the SPM12 code while keeping nomenclature consistent with the spectral DCM paper
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 priors = [Πθ_p, Πλ_p, λμ, Q];
-foo = Ref{Any}()
+
 ### Compute the DCM ###
 @time results = variationalbayes(x, y_csd, freqs, V, param, priors, 128)

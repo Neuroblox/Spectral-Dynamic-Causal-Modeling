@@ -36,6 +36,7 @@ using ChainRules: _eigen_norm_phase_fwd!
 using Serialization
 tagtype(::Dual{T,V,N}) where {T,V,N} = T
 
+counter = 0 
 # Base.eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
 # Base.signbit(x::Complex{T}) where {T<:AbstractFloat} = real(x) < 0
 # struct NeurobloxTag end
@@ -288,6 +289,8 @@ end
     for i = 1:nd
         Gn[:,i,i] .+= exp(γ[i])*G
     end
+    global counter += 1
+    Main.csdapproxvars[] = G, Gn, β, α, γ
 
     # global components
     for i = 1:nd
