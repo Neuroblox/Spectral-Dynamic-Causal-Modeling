@@ -17,8 +17,6 @@ using Distributions
 
 using Flux
 
-using Flux
-
 ### a few packages relevant for speed tests and profiling ###
 using Serialization
 
@@ -141,11 +139,11 @@ csdapproxvars = Ref{Any}()
 ADVIsteps = 1000
 ADVIsamples = 10
 local vals
-n = 3
-for iter = 3:5
+n = 2
+for iter = 1:1
     vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
     t_juliaADVI = @elapsed (q, advi, model) = wrapperfunction_ADVI(vals, ADVIsamples, ADVIsteps)
-    serialize("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(n) * ".dat", (q, advi, model, t_juliaADVI))
+    # serialize("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(n) * ".dat", (q, advi, model, t_juliaADVI))
 end
 
 # # Note for 3 regions

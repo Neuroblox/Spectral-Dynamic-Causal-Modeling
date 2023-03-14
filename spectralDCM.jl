@@ -52,7 +52,7 @@ end
 # define a few more initial values of parameters of the model
 dim = size(A, 1);
 C = zeros(Float64, dim);          # C as in equation 3. NB: whatever C is defined to be here, it will be replaced in csd_approx. Another little strange thing of SPM12...
-lnα = [0.0 0.0; 0.0 0.0];                 # ln(α) as in equation 2 
+lnα = [0.0, 0.0];                 # ln(α) as in equation 2 
 lnβ = [0.0, 0.0];                 # ln(β) as in equation 2
 lnγ = zeros(Float64, dim);        # region specific observation noise parameter
 lnϵ = 0.0;                        # BOLD signal parameter
