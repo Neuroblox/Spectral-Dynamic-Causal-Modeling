@@ -1,4 +1,5 @@
 # Hemodynamics and bold signal all in one
+using ModelingToolkit
 
 @parameters t
 D = Differential(t)
@@ -23,11 +24,11 @@ function hemodynamicsMTK(;name, κ=0.0, τ=0.0)
         D(lnq) ~ (exp(lnf)/exp(lnq)*((1 - (1 - H[5])^(exp(lnf)^-1))/H[5]) - exp(lnν)^(H[4]^-1 - 1))/(H[3]*exp(τ))
     ]
 
-    return ODESystem(eqs, t, states, params; name=name, defaults=Dict(κ=>lndecay, τ=>lntransit))
+    return ODESystem(eqs, t, states, params; name=name)
 end
 
 
-function boldsignal(lnϵ; name)
+function boldsignal(;name, lnϵ=0.0)
     # NB: Biophysical constants for 1.5T scanners
     # Time to echo
     TE  = 0.04

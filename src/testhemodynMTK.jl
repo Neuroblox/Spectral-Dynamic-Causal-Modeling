@@ -131,7 +131,8 @@ model = structural_simplify(model)
 
 jac = calculate_jacobian(model)
 
-foo = substitute(jac, Dict([r.hemo.τ => 2.0 for r in regions]))
+foo = substitute(jac_f, modelparam)
+
 
 [r.hemo.τ => 2.0 for r in regions]
 

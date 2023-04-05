@@ -290,7 +290,6 @@ end
         Gn[:,i,i] .+= exp(γ[i])*G
     end
     global counter += 1
-    Main.csdapproxvars[] = G, Gn, β, α, γ
 
     # global components
     for i = 1:nd

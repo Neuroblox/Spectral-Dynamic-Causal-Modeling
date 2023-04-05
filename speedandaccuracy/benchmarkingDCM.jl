@@ -2,7 +2,7 @@
 using ProfileView
 using StatProfilerHTML
 using BenchmarkTools
-
+using LaTeXStrings
 
 using LinearAlgebra
 using MKL
@@ -166,11 +166,14 @@ r = 2
 vals = matread("speedandaccuracy/matlab0.01_" * string(r) * "regions.mat");
 A_true = vals["true_params"]["A"]
 d = size(A_true, 1)
-ADVIsteps = 1000
+ADVIsteps = 2000
 ADVIsamples = 10
 iter = 1
-q = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat")[1];
-
+(q, advi, cond_model) = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat");
+Fs = zeros(1000)
+for i = 1:1000
+    Fs[i] = Turing.elbo(advi, q, cond_model, 100)
+end
 X = []
 Yj = []
 Yj_total = []
@@ -208,6 +211,7 @@ scatter!(X, Yt, label="True", wide=2, legend=:best, color=:red, markershape=:sta
 scatter!(X, mean(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)
 title!("standard deviation of interaction = 0.01\n ADVI samples = " * string(ADVIsamples) * ", steps =" * string(ADVIsteps) * ", regions = " * string(r))
 
+violin!(repeat(X,outer=5), vcat(Yj_total...), coloralpha=0.3)
 savefig("speedandaccuracy/plots/ADVI_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
 
 
@@ -253,7 +257,7 @@ savefig("speedandaccuracy/plots/ADVI_sa" * string(ADVIsamples) * "_st" * string(
 # iter = 20
 
 
-# ### Speedtest - note that the above then needs to be defined within a function ###
-# # speedtest(vars)
-# ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
-# @profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)
+### Speedtest - note that the above then needs to be defined within a function ###
+# speedtest(vars)
+ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
+@profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)
