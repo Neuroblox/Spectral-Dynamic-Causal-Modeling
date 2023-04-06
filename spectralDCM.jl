@@ -13,7 +13,7 @@ function Base.vec(x::T) where (T <: Real)
 end
 
 include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                      # multivariate auto-regressive model functions
 
 
@@ -33,7 +33,7 @@ A = vars["pE"]["A"];                 # initial values of connectivity matrix
 λμ = vec(vars["hE"]);                # prior mean of hyperparameters
 Πλ_p = vars["ihC"];                  # prior precision matrix of hyperparameters
 if typeof(Πλ_p) <: Number            # typically Πλ_p is a matrix, however, if only one hyperparameter is used it will turn out to be a scalar -> transform that to matrix
-    Πλ_p *= ones(1,1)
+    Πλ_p *= ones(1, 1)
 end
 
 # depending on the definition of the priors (note that we take it from the SPM12 code), some dimensions are set to 0 and thus are not changed.

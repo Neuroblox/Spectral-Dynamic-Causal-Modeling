@@ -39,7 +39,7 @@ if typeof(Πλ_p) <: Number            # typically Πλ_p is a matrix, however, 
     Πλ_p *= ones(1,1)
 end
 
-########## assembel the model ##########
+########## assemble the model ##########
 
 regions = []
 connex = Num[]
@@ -66,6 +66,15 @@ grad_g = calculate_jacobian(bold)[2:3]
 
 # define values of states
 all_s = states(f)
+# all_s = [s[3] for s in split.(string.(states(f)), "₊")]
+# idx = Array{Int64}[]
+# for s in unique(all_s)
+#     push!(idx, findall(all_s .== s))
+# end
+# idx = vcat(idx...)
+# all_s = states(f)[idx]
+# jac_f = jac_f[idx, idx]
+
 sts = Dict{typeof(all_s[1]), eltype(x)}()
 for i in 1:nd
     for (j, s) in enumerate(all_s[occursin.("r$i", string.(all_s))])
@@ -141,5 +150,6 @@ end
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 
 priors = Dict(:Πθ_pr => Πθ_p, :Πλ_pr => Πλ_p, :μλ_pr => λμ, :Q => Q);
+
 ### Compute the DCM ###
 @time results = variationalbayes(sts, y_csd, derivatives, freqs, V, p, modelparam, priors, 128)

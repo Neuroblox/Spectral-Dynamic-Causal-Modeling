@@ -132,8 +132,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # J_x = jacobian(f, x0) # well, no need to perform this for a linear system... we already have it: θμ
     C /= 16.0   # TODO: unclear why it is devided by 16 but see spm_fx_fmri.m:49
     # 2. get jacobian of hemodynamics
-    dx = similar(x[:, 2:end])
-    J = hemodynamics!(dx, x[:, 2:end], x[:, 1], lndecay, lntransit)[2]
+    J = hemodynamics_jacobian(x[:, 2:end], lndecay, lntransit)
     θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
     # if I eventually need also the change of variables rather than just the derivative then here is where to fix it!
     nd = size(θμ, 1)
