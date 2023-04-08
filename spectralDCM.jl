@@ -33,7 +33,7 @@ A = vars["pE"]["A"];                 # initial values of connectivity matrix
 λμ = vec(vars["hE"]);                # prior mean of hyperparameters
 Πλ_p = vars["ihC"];                  # prior precision matrix of hyperparameters
 if typeof(Πλ_p) <: Number            # typically Πλ_p is a matrix, however, if only one hyperparameter is used it will turn out to be a scalar -> transform that to matrix
-    Πλ_p *= ones(1,1)
+    Πλ_p *= ones(1, 1)
 end
 
 # depending on the definition of the priors (note that we take it from the SPM12 code), some dimensions are set to 0 and thus are not changed.
@@ -52,7 +52,7 @@ end
 # define a few more initial values of parameters of the model
 dim = size(A, 1);
 C = zeros(Float64, dim);          # C as in equation 3. NB: whatever C is defined to be here, it will be replaced in csd_approx. Another little strange thing of SPM12...
-lnα = [0.0 0.0; 0.0 0.0];                 # ln(α) as in equation 2 
+lnα = [0.0, 0.0];                 # ln(α) as in equation 2 
 lnβ = [0.0, 0.0];                 # ln(β) as in equation 2
 lnγ = zeros(Float64, dim);        # region specific observation noise parameter
 lnϵ = 0.0;                        # BOLD signal parameter
@@ -63,6 +63,6 @@ param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; lnα[1]; lnβ[1]; ln
 # Strange α and β sorting? yes. This is to be consistent with the SPM12 code while keeping nomenclature consistent with the spectral DCM paper
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 priors = [Πθ_p, Πλ_p, λμ, Q];
-foo = Ref{Any}()
+
 ### Compute the DCM ###
 @time results = variationalbayes(x, y_csd, freqs, V, param, priors, 128)

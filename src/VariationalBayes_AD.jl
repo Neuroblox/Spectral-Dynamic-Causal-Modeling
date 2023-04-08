@@ -36,6 +36,7 @@ using ChainRules: _eigen_norm_phase_fwd!
 using Serialization
 tagtype(::Dual{T,V,N}) where {T,V,N} = T
 
+counter = 0 
 # Base.eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
 # Base.signbit(x::Complex{T}) where {T<:AbstractFloat} = real(x) < 0
 # struct NeurobloxTag end
@@ -131,8 +132,7 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # J_x = jacobian(f, x0) # well, no need to perform this for a linear system... we already have it: θμ
     C /= 16.0   # TODO: unclear why it is devided by 16 but see spm_fx_fmri.m:49
     # 2. get jacobian of hemodynamics
-    dx = similar(x[:, 2:end])
-    J = hemodynamics!(dx, x[:, 2:end], x[:, 1], lndecay, lntransit)[2]
+    J = hemodynamics_jacobian(x[:, 2:end], lndecay, lntransit)
     θμ -= diagm(exp.(diag(θμ))/2 + diag(θμ))
     # if I eventually need also the change of variables rather than just the derivative then here is where to fix it!
     nd = size(θμ, 1)
@@ -176,7 +176,6 @@ function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
             end
         end
     end
-    Main.transfervars[] = J_tot, F, S, dgdv, dvdu
     return S
 end
 
@@ -215,7 +214,6 @@ function csd2mar(csd, w, dt, p)
     for i = 1:m
         for j = 1:m
             A[((i-1)*p+1):i*p, j] = ccf[(1:p) .+ 1, i, j]
-            Main.csd2marvars[] = ccf, csd
             B[((i-1)*p+1):i*p, ((j-1)*p+1):j*p] = Toeplitz(ccf[1:p, i, j], vcat(ccf[1,i,j], ccf[2:p, j, i]))  # SymmetricToeplitz(ccf[1:p, i, j])
         end
     end
@@ -290,6 +288,7 @@ end
     for i = 1:nd
         Gn[:,i,i] .+= exp(γ[i])*G
     end
+    global counter += 1
 
     # global components
     for i = 1:nd
@@ -307,7 +306,6 @@ end
         G[i,:,:] = S[i,:,:]*Gu[i,:,:]*S[i,:,:]'
     end
     G_final = G + Gn
-    Main.csdapproxvars[] = G, Gn, S, Gu
     return G_final
 end
 
