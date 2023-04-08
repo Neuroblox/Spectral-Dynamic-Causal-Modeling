@@ -1,7 +1,76 @@
 # Hemodynamics and bold signal all in one
+using ModelingToolkit
+
+@parameters t
+D = Differential(t)
+
+function hemodynamicsMTK(;name, κ=0.0, τ=0.0)
+    #= hemodynamic parameters
+        H(1) - signal decay                                   d(ds/dt)/ds)
+        H(2) - autoregulation                                 d(ds/dt)/df)
+        H(3) - transit time                                   (t0)
+        H(4) - exponent for Fout(v)                           (alpha)
+        H(5) - resting oxygen extraction                      (E0)
+    =#
+    H = [0.64, 0.32, 2.00, 0.32, 0.4]
+
+    params = @parameters κ=κ τ=τ
+    states = @variables s(t) lnf(t) lnν(t) lnq(t) x(t)
+
+    eqs = [
+        D(s)   ~ x - H[1]*exp(κ)*s - H[2]*(exp(lnf) - 1),
+        D(lnf) ~ s / exp(lnf),
+        D(lnν) ~ (exp(lnf) - exp(lnν)^(H[4]^-1)) / (H[3]*exp(τ)*exp(lnν)),
+        D(lnq) ~ (exp(lnf)/exp(lnq)*((1 - (1 - H[5])^(exp(lnf)^-1))/H[5]) - exp(lnν)^(H[4]^-1 - 1))/(H[3]*exp(τ))
+    ]
+
+    return ODESystem(eqs, t, states, params; name=name)
+end
 
 
-function hemodynamics!(dx, x, na, decay, transit)
+function boldsignal(;name, lnϵ=0.0)
+    # NB: Biophysical constants for 1.5T scanners
+    # Time to echo
+    TE  = 0.04
+    # resting venous volume (%)
+    V0  = 4
+    # slope r0 of intravascular relaxation rate R_iv as a function of oxygen 
+    # saturation S:  R_iv = r0*[(1 - S)-(1 - S0)] (Hz)
+    r0  = 25
+    # frequency offset at the outer surface of magnetized vessels (Hz)
+    nu0 = 40.3
+    # resting oxygen extraction fraction
+    E0  = 0.4
+    # -Coefficients in BOLD signal model
+    k1  = 4.3*nu0*E0*TE
+
+    params = @parameters lnϵ=lnϵ
+    vars = @variables bold(t) q(t) ν(t)
+
+    eqs = [
+        bold ~ V0*(k1 - k1*exp(q) + exp(lnϵ)*r0*E0*TE - exp(lnϵ)*r0*E0*TE*exp(q)/exp(ν) + 1-exp(lnϵ) - (1-exp(lnϵ))*exp(ν))
+    ]
+
+    ODESystem(eqs, t, vars, params; name=name)
+end
+
+function linearneuralmass(;name)
+    states = @variables x(t) jcn(t)
+    eqs = D(x) ~ jcn
+    return ODESystem(eqs, t, states, []; name=name)
+end
+
+function linearconnectionssymbolic(;name, sys=sys, adj_matrix=adj_matrix, connector=connector)
+    eqs = []
+    nr = length(sys)
+    for i in 1:nr
+       push!(eqs, sys[i].nmm.jcn ~ sum(adj_matrix[(1+(i-1)*nr):nr*i] .* connector))
+    end
+    return ODESystem(eqs, name=name, systems=sys)
+end
+
+
+function hemodynamics_jacobian(x, decay, transit)
     """
     na     - neural activity
     Components of x are:
@@ -38,18 +107,11 @@ function hemodynamics!(dx, x, na, decay, transit)
     # transit time
     τ = H[3]*exp.(transit)
 
-    # Fout = f(v) - outflow
-    fv = x[:, 3].^(H[4]^-1)
+    # # Fout = f(v) - outflow
+    # fv = x[:, 3].^(H[4]^-1)
 
-    # e = f(f) - oxygen extraction
-    ff = (1.0 .- (1.0 - H[5]).^(x[:, 2].^-1))/H[5]
-
-    # implement differential state equation f = dx/dt (hemodynamic)
-
-    # dx[:, 1] = na .- κ.*x[:, 1] .- H[2]*(x[:, 2] .- 1)   # Corresponds to eq (9)
-    # dx[:, 2] = x[:, 1]./x[:, 2]  # Corresponds to eq (10), note the added logarithm (see doc string)
-    # dx[:, 3] = (x[:, 2] .- fv)./(τ.*x[:, 3])    # Corresponds to eq (8), note the added logarithm (see doc string)
-    # dx[:, 4] = (ff.*x[:, 2] .- fv.*x[:, 4]./x[:, 3])./(τ.*x[:, 4])  # Corresponds to eq (8), note the added logarithm (see doc string)
+    # # e = f(f) - oxygen extraction
+    # ff = (1.0 .- (1.0 - H[5]).^(x[:, 2].^-1))/H[5]
 
     d = size(x)[1]   # number of dimensions, equals typically number of regions
     J = zeros(typeof(κ), 4d, 4d)
@@ -64,7 +126,7 @@ function hemodynamics!(dx, x, na, decay, transit)
     J[3d+1:4d,2d+1:3d] = diagm((x[:,3].^(H[4]^-1 - 1)*(H[4] - 1))./(τ*H[4]))
     J[3d+1:4d,3d+1:4d] = diagm((x[:,2]./x[:,4]).*((1 - H[5]).^(x[:,2].^-1) .- 1)./(τ*H[5]))
 
-    return (dx, J)
+    return J
 end
 
 # Simulate the BOLD signal
@@ -117,7 +179,7 @@ function boldsignal(x, lnϵ)
 
     nd = size(x, 1)
     ∇ = zeros(typeof(k3), nd, 2nd)
-    ∇[1:nd, 1:nd]     = diagm(-V0*(k3*ν .- k2*q./ν))    # TODO: it is unclear why this is the correct gradient, do the algebra... (note this is a gradient per area, not a Jacobian)
+    ∇[1:nd, 1:nd]     = diagm(-V0*(k3*ν .- k2*q./ν))
     ∇[1:nd, nd+1:2nd] = diagm(-V0*(k1*q .+ k2*q./ν))
 
     return (bold, ∇)

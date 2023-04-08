@@ -2,7 +2,7 @@
 using ProfileView
 using StatProfilerHTML
 using BenchmarkTools
-
+using LaTeXStrings
 
 using LinearAlgebra
 using MKL
@@ -14,6 +14,8 @@ using ForwardDiff
 
 using Turing
 using Distributions
+
+using Flux
 
 ### a few packages relevant for speed tests and profiling ###
 using Serialization
@@ -88,7 +90,8 @@ function wrapperfunction_ADVI(vars, samples, steps)
     x = vars["x"];           # initial condition of dynamic variabls
     dim = size(x, 1);
     Σ = vars["pC"]
-    
+
+
     @model function fitADVI_csd(csd_data)
         # set priors of variable parameters
         # Σ ~ InverseWishart(σ_μ, σ_σ)
@@ -114,13 +117,15 @@ function wrapperfunction_ADVI(vars, samples, steps)
         if eltype(csd) <: Dual
             csd = (p->p.value).(csd)
         end
-    
+
+
         csd_real = real(vec(csd_data))
         csd_imag = imag(vec(csd_data))
         csd_real ~ MvNormal(real(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
         csd_imag ~ MvNormal(imag(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
     end
-    
+
+
     # ADVI
     modelEMn = fitADVI_csd(y_csd)
     Turing.setadbackend(:forwarddiff)
@@ -130,15 +135,13 @@ function wrapperfunction_ADVI(vars, samples, steps)
     return (q, advi, modelEMn)
 end
 
-csd2marvars = Ref{Any}()
-transfervars = Ref{Any}()
 csdapproxvars = Ref{Any}()
 ADVIsteps = 1000
 ADVIsamples = 10
 local vals
 n = 2
 for iter = 1:1
-    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) *"regions.mat");
+    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
     t_juliaADVI = @elapsed (q, advi, model) = wrapperfunction_ADVI(vals, ADVIsamples, ADVIsteps)
     # serialize("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(n) * ".dat", (q, advi, model, t_juliaADVI))
 end
@@ -166,10 +169,14 @@ d = size(A_true, 1)
 ADVIsteps = 2000
 ADVIsamples = 10
 iter = 1
-q = deserialize("speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat")[1];
-
+(q, advi, cond_model) = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat");
+Fs = zeros(1000)
+for i = 1:1000
+    Fs[i] = Turing.elbo(advi, q, cond_model, 100)
+end
 X = []
 Yj = []
+Yj_total = []
 Ym = []
 Yt = []
 for i = 1:d
@@ -177,16 +184,16 @@ for i = 1:d
         if i == j
             continue
         end
-        push!(X, "a$i$j")
+        push!(X, "a_$i$j")
         push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
         push!(Ym, vals["Ep"]["A"][i, j])
         push!(Yt, A_true[i, j])
     end
 end
-scatter(X, Yt, label="True", color=:red, markershape=:star5, ylabel="interaction strength", title="standard deviation of interaction strength = 0.01\n number of regions = " * string(r))
-scatter!(X, Yj, label="ADVI", color=:green)
+push!(Yj_total, Yj)
+scatter(X, Yj, label="ADVI", widen=2,color=:orange, markeralpha=0.3)
 for iter = 2:5
-    q = deserialize("speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat")[1];
+    q = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat")[1];
     Yj = []
     for i = 1:d
         for j = 1:d
@@ -196,12 +203,16 @@ for iter = 2:5
             push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
         end
     end
-    scatter!(X, Yj, label=false, color=:green)
+    scatter!(X, Yj, label=false, color=:orange, markeralpha=0.3)
+    push!(Yj_total, Yj)
 end
-scatter!(X, Ym, label="Laplace approximation", color=:blue)
+scatter!(X, Ym, label="Laplace", color=:blue)
+scatter!(X, Yt, label="True", wide=2, legend=:best, color=:red, markershape=:star5, ylabel="interaction strength")
+scatter!(X, mean(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)
+title!("standard deviation of interaction = 0.01\n ADVI samples = " * string(ADVIsamples) * ", steps =" * string(ADVIsteps) * ", regions = " * string(r))
 
-savefig("speedandaccuracy/plots/ADVI_Laplace_0.01_2regions_means_20samples_2000steps.png")
-title!("standard deviation of interaction strength = 0.01\n ADVI samples = 20, steps = 2000 regions = " * string(r))
+violin!(repeat(X,outer=5), vcat(Yj_total...), coloralpha=0.3)
+savefig("speedandaccuracy/plots/ADVI_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
 
 
 # using StatsPlots
@@ -246,7 +257,7 @@ title!("standard deviation of interaction strength = 0.01\n ADVI samples = 20, s
 # iter = 20
 
 
-# ### Speedtest - note that the above then needs to be defined within a function ###
-# # speedtest(vars)
-# ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
-# @profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)
+### Speedtest - note that the above then needs to be defined within a function ###
+# speedtest(vars)
+ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
+@profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)
