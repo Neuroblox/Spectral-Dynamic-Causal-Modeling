@@ -1,8 +1,8 @@
 # using Profile
-using ProfileView
-using StatProfilerHTML
+# using ProfileView
+# using StatProfilerHTML
 using BenchmarkTools
-using LaTeXStrings
+# using LaTeXStrings
 
 using LinearAlgebra
 using MKL
@@ -135,16 +135,16 @@ function wrapperfunction_ADVI(vars, samples, steps)
     return (q, advi, modelEMn)
 end
 
-csdapproxvars = Ref{Any}()
-ADVIsteps = 1000
-ADVIsamples = 10
-local vals
-n = 2
-for iter = 1:1
-    vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
-    t_juliaADVI = @elapsed (q, advi, model) = wrapperfunction_ADVI(vals, ADVIsamples, ADVIsteps)
-    # serialize("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(n) * ".dat", (q, advi, model, t_juliaADVI))
-end
+# csdapproxvars = Ref{Any}()
+# ADVIsteps = 1000
+# ADVIsamples = 10
+# local vals
+# n = 2
+# for iter = 1:1
+#     vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
+#     t_juliaADVI = @elapsed (q, advi, model) = wrapperfunction_ADVI(vals, ADVIsamples, ADVIsteps)
+#     # serialize("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(n) * ".dat", (q, advi, model, t_juliaADVI))
+# end
 
 # # Note for 3 regions
 # # if I use the native version I improve drastically in parameters and free energy over correct Q and random inits
@@ -161,58 +161,58 @@ end
 # rms_Laplace = abs.(vals["Ep"]["A"] - A_true)
 
 
-using Plots
-r = 2
-vals = matread("speedandaccuracy/matlab0.01_" * string(r) * "regions.mat");
-A_true = vals["true_params"]["A"]
-d = size(A_true, 1)
-ADVIsteps = 2000
-ADVIsamples = 10
-iter = 1
-(q, advi, cond_model) = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat");
-Fs = zeros(1000)
-for i = 1:1000
-    Fs[i] = Turing.elbo(advi, q, cond_model, 100)
-end
-X = []
-Yj = []
-Yj_total = []
-Ym = []
-Yt = []
-for i = 1:d
-    for j = 1:d
-        if i == j
-            continue
-        end
-        push!(X, "a_$i$j")
-        push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
-        push!(Ym, vals["Ep"]["A"][i, j])
-        push!(Yt, A_true[i, j])
-    end
-end
-push!(Yj_total, Yj)
-scatter(X, Yj, label="ADVI", widen=2,color=:orange, markeralpha=0.3)
-for iter = 2:5
-    q = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat")[1];
-    Yj = []
-    for i = 1:d
-        for j = 1:d
-            if i == j
-                continue
-            end
-            push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
-        end
-    end
-    scatter!(X, Yj, label=false, color=:orange, markeralpha=0.3)
-    push!(Yj_total, Yj)
-end
-scatter!(X, Ym, label="Laplace", color=:blue)
-scatter!(X, Yt, label="True", wide=2, legend=:best, color=:red, markershape=:star5, ylabel="interaction strength")
-scatter!(X, mean(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)
-title!("standard deviation of interaction = 0.01\n ADVI samples = " * string(ADVIsamples) * ", steps =" * string(ADVIsteps) * ", regions = " * string(r))
+# using Plots
+# r = 2
+# vals = matread("speedandaccuracy/matlab0.01_" * string(r) * "regions.mat");
+# A_true = vals["true_params"]["A"]
+# d = size(A_true, 1)
+# ADVIsteps = 2000
+# ADVIsamples = 10
+# iter = 1
+# (q, advi, cond_model) = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat");
+# Fs = zeros(1000)
+# for i = 1:1000
+#     Fs[i] = Turing.elbo(advi, q, cond_model, 100)
+# end
+# X = []
+# Yj = []
+# Yj_total = []
+# Ym = []
+# Yt = []
+# for i = 1:d
+#     for j = 1:d
+#         if i == j
+#             continue
+#         end
+#         push!(X, "a_$i$j")
+#         push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
+#         push!(Ym, vals["Ep"]["A"][i, j])
+#         push!(Yt, A_true[i, j])
+#     end
+# end
+# push!(Yj_total, Yj)
+# scatter(X, Yj, label="ADVI", widen=2,color=:orange, markeralpha=0.3)
+# for iter = 2:5
+#     q = deserialize("speedandaccuracy/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat")[1];
+#     Yj = []
+#     for i = 1:d
+#         for j = 1:d
+#             if i == j
+#                 continue
+#             end
+#             push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
+#         end
+#     end
+#     scatter!(X, Yj, label=false, color=:orange, markeralpha=0.3)
+#     push!(Yj_total, Yj)
+# end
+# scatter!(X, Ym, label="Laplace", color=:blue)
+# scatter!(X, Yt, label="True", wide=2, legend=:best, color=:red, markershape=:star5, ylabel="interaction strength")
+# scatter!(X, mean(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)
+# title!("standard deviation of interaction = 0.01\n ADVI samples = " * string(ADVIsamples) * ", steps =" * string(ADVIsteps) * ", regions = " * string(r))
 
-violin!(repeat(X,outer=5), vcat(Yj_total...), coloralpha=0.3)
-savefig("speedandaccuracy/plots/ADVI_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
+# violin!(repeat(X,outer=5), vcat(Yj_total...), coloralpha=0.3)
+# savefig("speedandaccuracy/plots/ADVI_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
 
 
 # using StatsPlots
@@ -231,25 +231,26 @@ savefig("speedandaccuracy/plots/ADVI_sa" * string(ADVIsamples) * "_st" * string(
 # StatsPlots.violin(["a12"], samples[1][2,:])
 # StatsPlots.violin!(["a21"], samples[1][3,:])
 
-# for n = 2:8
-#     vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions" * string(n) *".mat");
-#     include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-#     wrapperfunction(vals, 1)
-#     t_juliaAD = @elapsed res_AD = wrapperfunction(vals, 128)
-#     include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-#     wrapperfunction(vals, 1)
-#     t_juliaSPM = @elapsed res_spm = wrapperfunction(vals, 128)
-#     @show t_juliaAD, t_juliaSPM
+for n in vcat(collect(2:10), 15)
+    vals = matread("Dynamic-Causal-Modeling/speedandaccuracy/nregions" * string(n) *".mat");
+    include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+    wrapperfunction(vals, 1)
+    t_juliaAD = @elapsed res_AD = wrapperfunction(vals, 128)
+    include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+    wrapperfunction(vals, 1)
+    t_juliaSPM = @elapsed res_spm = wrapperfunction(vals, 128)
+    @show t_juliaAD, t_juliaSPM
 
-#     matwrite("speedandaccuracy/n" * string(n) * ".mat", Dict(
-#         "t_mat" => vals["matcomptime"],
-#         "F_mat" => vals["F"],
-#         "t_jad" => t_juliaAD,
-#         "F_jad" => res_AD.F,
-#         "t_jspm" => t_juliaSPM,
-#         "F_jspm" => res_spm.F,
-#     ); compress = true)    
-# end
+    matwrite("speedandaccuracy/n" * string(n) * ".mat", Dict(
+        "t_mat" => vals["matcomptime"],
+        "F_mat" => vals["F"],
+        "t_jad" => t_juliaAD,
+        "F_jad" => res_AD.F,
+        "t_jspm" => t_juliaSPM,
+        "F_jspm" => res_spm.F,
+        "iter" => res_spm.iter
+    ); compress = true)
+end
 
 # file = matopen("speedandaccuracy/nregions" * n * ".mat")
 # t_matlab = read(file, "matcomptime")
@@ -259,5 +260,5 @@ savefig("speedandaccuracy/plots/ADVI_sa" * string(ADVIsamples) * "_st" * string(
 
 ### Speedtest - note that the above then needs to be defined within a function ###
 # speedtest(vars)
-ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
-@profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)
+# ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
+# @profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 15)
