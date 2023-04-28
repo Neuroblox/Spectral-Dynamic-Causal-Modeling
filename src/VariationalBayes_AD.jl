@@ -380,7 +380,7 @@ mutable struct vb_state
     F::Float64
     λ::Vector{Float64}
     ϵ_θ::Vector{Float64}
-    μθ::Vector{Float64}
+    μθ_po::Vector{Float64}
     Σθ::Matrix{Float64}
 end
 
@@ -393,14 +393,14 @@ end
 
     # prep stuff
     p = Int(param[1])
-    θμ = param[2:end]          # note: μθ is posterior and θμ is prior
+    θμ = param[2:end]          # note: μθ_po is posterior and θμ is prior
     np = size(V, 2)            # number of parameters
     ny = length(y)             # total number of response variables
     nq = 1
     nh = size(Q,3)             # number of precision components (this is the same as above, but may differ)
     λ = 8 * ones(nh)
     ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
-    μθ = θμ + V*ϵ_θ
+    μθ_po = θμ + V*ϵ_θ
  
     revert = false
     f_prep = param -> csd_fmri_mtf(x, w, p, param)
@@ -411,18 +411,18 @@ end
     previous_F = F
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
-    state = vb_state(0, F, λ, zeros(np), μθ, inv(Πθ_p))
+    state = vb_state(0, F, λ, zeros(np), μθ_po, inv(Πθ_p))
 
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
     for k = 1:niter
         state.iter = k
 
-        f = f_prep(μθ)
+        f = f_prep(μθ_po)
         # jac_prototype = Array{Dual{ForwardDiff.Tag{NeurobloxTag, ComplexF64}, ComplexF64, 12}}(undef, ny, np)
         # @show typeof(jac_prototype)
-        # dfdp = forwarddiff_color_jacobian(f_prep, μθ) * V
+        # dfdp = forwarddiff_color_jacobian(f_prep, μθ_po) * V
         # forwarddiff_color_jacobian(f,x,ForwardColorJacCache(f,x,chunksize,tag = NeurobloxTag()),nothing)
-        dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
+        dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
         # dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
 
         norm_dfdp = matlab_norm(dfdp, Inf);
@@ -441,11 +441,11 @@ end
                     ϵ_θ = state.ϵ_θ + expv(t, dFdpp, dFdpp \ dFdp) - dFdpp \ dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
                 end
 
-                μθ = θμ + V*ϵ_θ
+                μθ_po = θμ + V*ϵ_θ
 
-                f = f_prep(μθ)
-                # dfdp = forwarddiff_color_jacobian(f_prep, μθ) * V
-                dfdp = ForwardDiff.jacobian(f_prep, μθ) * V
+                f = f_prep(μθ_po)
+                # dfdp = forwarddiff_color_jacobian(f_prep, μθ_po) * V
+                dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
 
                 # check for stability
                 norm_dfdp = matlab_norm(dfdp, Inf);
@@ -534,7 +534,7 @@ end
             state.ϵ_θ = ϵ_θ
             state.λ = λ
             state.Σθ = Σθ
-            state.μθ = μθ
+            state.μθ_po = μθ_po
             state.F = F
             # Conditional update of gradients and curvature
             dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ    # check sign
@@ -558,7 +558,7 @@ end
         end
 
         ϵ_θ += dθ
-        μθ = θμ + V*ϵ_θ
+        μθ_po = θμ + V*ϵ_θ
         dF = dot(dFdp, dθ);
 
         # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times
@@ -572,6 +572,6 @@ end
     print("iterations terminated\n")
     state.F = F
     state.Σθ = V*Σθ*V'
-    state.μθ = μθ
+    state.μθ_po = μθ_po
     return state
 end
