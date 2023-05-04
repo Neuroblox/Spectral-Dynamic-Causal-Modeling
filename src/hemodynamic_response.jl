@@ -4,6 +4,26 @@ using ModelingToolkit
 @parameters t
 D = Differential(t)
 
+"""
+Hemodynamic Response Function modeled by the sum of two gamma functions
+A[1] and A[2] model the magnitudes of the peak and undershoot terms, respectively.
+τ[1] and τ[2] model the width, peak height, and time-to-peak.
+δ[1] and δ[2] model the time-to-onset.
+
+Reference: Handwerker et al. 2004, NeuroImage
+"""
+function GammaHRF(;name, A=[3.5, -1.5], δ=[1.5, 7.8], τ=[4.0, 4.0], C=-0.5)
+    params = @parameters A=A δ=δ τ=τ C=C
+    states = @variables x(t), y(t)
+
+    eqs = [
+        y ~ A[1] * ((x - δ[1])/τ[1])^2 * exp(-((x - δ[1])/τ[1])^2)/τ[1] + 
+        A[2]*((x - δ[2])/τ[2])^2 * exp(-((x - δ[2])/τ[2])^2)/τ[2] + C
+    ]
+
+    return ODESystem(eqs, t, states, params; name=name)
+end
+
 function hemodynamicsMTK(;name, κ=0.0, τ=0.0)
     #= hemodynamic parameters
         H(1) - signal decay                                   d(ds/dt)/ds)

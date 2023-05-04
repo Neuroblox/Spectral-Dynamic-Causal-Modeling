@@ -13,7 +13,7 @@ function Base.vec(x::T) where (T <: Real)
 end
 
 include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                      # multivariate auto-regressive model functions
 
 
@@ -25,7 +25,7 @@ freqs = vec(vars["Hz"]);
 p = 8;                               # order of MAR, it is hard-coded in SPM12 with this value. We will just use the same for now.
 mar = mar_ml(y, p);                  # compute MAR from time series y and model order p
 y_csd = mar2csd(mar, freqs, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
-# y_csd = vars["data_csd"][1]
+y_csd = vars["csd"]
 ### Define priors and initial conditions ###
 x = vars["x"];                       # initial condition of dynamic variabls
 A = vars["pE"]["A"];                 # initial values of connectivity matrix

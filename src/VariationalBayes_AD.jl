@@ -393,7 +393,7 @@ end
 
     # prep stuff
     p = Int(param[1])
-    θμ = param[2:end]          # note: μθ is posterior and θμ is prior
+    θμ = param[2:end]          # note: μθ_po is posterior and θμ is prior
     np = size(V, 2)            # number of parameters
     ny = length(y)             # total number of response variables
     nq = 1
@@ -420,7 +420,7 @@ end
         f = f_prep(μθ_po)
         # jac_prototype = Array{Dual{ForwardDiff.Tag{NeurobloxTag, ComplexF64}, ComplexF64, 12}}(undef, ny, np)
         # @show typeof(jac_prototype)
-        # dfdp = forwarddiff_color_jacobian(f_prep, μθ) * V
+        # dfdp = forwarddiff_color_jacobian(f_prep, μθ_po) * V
         # forwarddiff_color_jacobian(f,x,ForwardColorJacCache(f,x,chunksize,tag = NeurobloxTag()),nothing)
         dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
         # dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
@@ -444,7 +444,7 @@ end
                 μθ_po = θμ + V*ϵ_θ
 
                 f = f_prep(μθ_po)
-                # dfdp = forwarddiff_color_jacobian(f_prep, μθ) * V
+                # dfdp = forwarddiff_color_jacobian(f_prep, μθ_po) * V
                 dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
 
                 # check for stability
