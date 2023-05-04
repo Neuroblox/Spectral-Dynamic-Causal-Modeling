@@ -7,7 +7,7 @@ using FFTW
 using ToeplitzMatrices
 using ExponentialUtilities
 using ForwardDiff
-using Plots
+using Serialization
 
 include("hemodynamic_response.jl")
 include("VariationalBayes_AD.jl")
@@ -17,7 +17,6 @@ function Base.vec(x::T) where (T <: Real)
     return x*ones(1)
 end
 
-<<<<<<< HEAD
 vars = matread("/home/david/Projects/neuroblox/codes/test2.mat");
 y = vars["data"];
 dt = vars["dt"];
@@ -62,11 +61,16 @@ end
 # ADVI
 modelEMn = fitADVI_csd(y_csd)
 Turing.setadbackend(:forwarddiff)
-advi = ADVI(10, 1000)
+
+ADVIsteps = 1000
+ADVIsamples = 10
+advi = ADVI(ADVIsamples, ADVIsteps) 
 setchunksize(8)
 q = vi(modelEMn, advi);
+iter = 1
+serialize("ADVIdata" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * ".dat", (q, advi, model))
 
-chain = sample(modelEMn, NUTS(), 1000);
+# chain = sample(modelEMn, NUTS(), 1000);
 
 # sampling
 # z = rand(q, 10000);
