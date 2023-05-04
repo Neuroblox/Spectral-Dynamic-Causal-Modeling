@@ -17,8 +17,7 @@ function Base.vec(x::T) where (T <: Real)
     return x*ones(1)
 end
 
-vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions3.mat");
-# vars = matread("/home/david/Projects/neuroblox/data/fMRIdata/Bernal-Casas/timeseries_D1.mat")
+vars = matread("/home/david/Projects/neuroblox/codes/test2.mat");
 y = vars["data"];
 dt = vars["dt"];
 w = vec(vars["Hz"]);
@@ -30,8 +29,6 @@ dim = size(x, 1);
 
 σ_μ = 1.0
 σ_σ = 1.0
-
-foo = Ref{Any}()
 
 
 @model function fitADVI_csd(csd_data)
