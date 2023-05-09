@@ -35,7 +35,7 @@ using Serialization
 
 
 """
-    This is essentially K(ω) in the spectral DCM paper.
+    This is essentially K(ω) in the spectral DCM paper that can be used for fMRI data. SPM12-like implementation.
 """
 function transferfunction_fmri(x, w, θμ, C, lnϵ, lndecay, lntransit)   # relates to: spm_dcm_mtf.m
     # compute transfer function of Volterra kernels, see fig 1 in friston2014 (spectral DCM paper)
@@ -88,6 +88,9 @@ function transferfunction_fmri(x, w, θμ, C, lnϵ, lndecay, lntransit)   # rela
     return S
 end
 
+"""
+transfer function for fMRI data based on MTK.
+"""
 function transferfunction_fmri(w, sts, derivatives, params)   # relates to: spm_dcm_mtf.m
 
     C = params[:C]
@@ -132,7 +135,9 @@ function transferfunction_fmri(w, sts, derivatives, params)   # relates to: spm_
     end
     return S
 end
-
+"""
+placeholder function that will be adapted to allow non-linear models
+"""
 function transferfunction(f, g, x, w, C, θμ, lnϵ, lndecay, lntransit)   # relates to: spm_dcm_mtf.m
 
     dfdu = [C; 
@@ -254,6 +259,8 @@ function mar2csd(mar, freqs)
 end
 
 """
+    MTK version.
+
     Main function in which actually some interesting computation happens. This function implements equation 2 of the spectral DCM paper.
     Note that nomenclature is taken from SPM12 code and it does not seem to coincide with the spectral DCM paper's nomenclature. 
     For instance, Gu should represent the spectral component due to external input according to the paper. However, in the code this represents
@@ -306,6 +313,9 @@ end
 
 δ = Int∘==
 
+"""
+    csd_approx used for nonlinear functions like the CMC.
+"""
 function csd_approx(f, x, w, θμ, C, α::Matrix, β, γ, lnϵ, lndecay, lntransit)
     # priors of spectral parameters
     # region specific neuronal noise ln(α), general measurement noise ln(β), region specific measurement noise: ln(γ)
@@ -340,7 +350,9 @@ function csd_approx(f, x, w, θμ, C, α::Matrix, β, γ, lnϵ, lndecay, lntrans
     return G + Gn
 end
 
-
+"""
+   SPM12-like version
+"""
 function csd_approx(x, w, θμ, C, α::Vector, β, γ, lnϵ, lndecay, lntransit)
     # priors of spectral parameters
     # region specific neuronal noise ln(α), general measurement noise ln(β), region specific measurement noise: ln(γ)
@@ -384,10 +396,8 @@ function csd_approx(x, w, θμ, C, α::Vector, β, γ, lnϵ, lndecay, lntransit)
     return G + Gn
 end
 
-
 """
-    Main function that computes the CSD: first arrange parameters, then call csd_approx which actually computes the CSD, and finally transform and back-transform to and from MAR.
-    It is unclear why this last step is performed. A possible purpose is smoothing of the CSD, but this step is not documented anywhere and just taken as is from SPM12.
+    MTK version
 """
 function csd_fmri_mtf(freqs, p, sts, derivatives, param)   # alongside the above realtes to spm_csd_fmri_mtf.m
     G = csd_approx(freqs, sts, derivatives, param)
@@ -401,6 +411,11 @@ function csd_fmri_mtf(freqs, p, sts, derivatives, param)   # alongside the above
     return y
 end
 
+"""
+    SPM12-like version.
+    Main function that computes the CSD: first arrange parameters, then call csd_approx which actually computes the CSD, and finally transform and back-transform to and from MAR.
+    It is unclear why this last step is performed. A possible purpose is smoothing of the CSD, but this step is not documented anywhere and just taken as is from SPM12.
+"""
 function csd_fmri_mtf(x, freqs, p, param)   # alongside the above realtes to spm_csd_fmri_mtf.m
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
@@ -419,6 +434,9 @@ function csd_fmri_mtf(x, freqs, p, param)   # alongside the above realtes to spm
     return y
 end
 
+"""
+    Version for non-linear models.
+"""
 function csd_lfp_mtf(f, x, freqs, p, param)   # alongside the above realtes to spm_csd_fmri_mtf.m
     dim = size(x, 1)
     θμ = reshape(param[1:dim^2], dim, dim)
@@ -433,7 +451,9 @@ function csd_lfp_mtf(f, x, freqs, p, param)   # alongside the above realtes to s
     return G
 end
 
-
+"""
+    SPM12-like version
+"""
 function diff(U, dx, f, param::Vector)
     nJ = size(U, 2)
     y0 = f(param)
@@ -445,6 +465,9 @@ function diff(U, dx, f, param::Vector)
     return J, y0
 end
 
+"""
+    MTK version
+"""
 function diff(U, dx, f, param::OrderedDict)
     nJ = size(U, 2)
     y0 = f(param)
@@ -648,7 +671,8 @@ function variationalbayes(sts, y, derivatives, w, V, p, param, priors, niter)   
             if t > exp(16)
                 dλ = -real(inv(dFdλλ) * dFdλ)
             else
-                dλ = real(expv(t, dFdλλ, inv(dFdλλ)*dFdλ) -inv(dFdλλ)*dFdλ)   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                idFdλλ = inv(dFdλλ)
+                dλ = real(expv(t, dFdλλ, idFdλλ*dFdλ) - idFdλλ*dFdλ)   # (expm(dfdx*t) - I)*inv(dfdx)*f
             end
 
             dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
@@ -751,8 +775,8 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
     criterion = [false, false, false, false]
     state = vb_state(0, F, λ, zeros(np), μθ, inv(Πθ_p))
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
-    dFdh = zeros(ComplexF64, nh)
-    dFdhh = zeros(Float64, nh, nh)
+    dFdλ = zeros(ComplexF64, nh)
+    dFdλλ = zeros(Float64, nh, nh)
     for k = 1:niter
         state.iter = k
 
@@ -815,30 +839,31 @@ function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_
             end
 
             for i = 1:nh
-                dFdh[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ,P[:,:,i],ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
+                dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ,P[:,:,i],ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
                 for j = i:nh
-                    dFdhh[i, j] = - real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2     # eps = randn(sizen), (eps' * Ai) * (Aj * eps)
-                    dFdhh[j, i] = dFdhh[i, j]
+                    dFdλλ[i, j] = - real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2     # eps = randn(sizen), (eps' * Ai) * (Aj * eps)
+                    dFdλλ[j, i] = dFdλλ[i, j]
                 end
             end
 
             ϵ_λ = λ - λμ
-            dFdh = dFdh - Πλ_p*ϵ_λ
-            dFdhh = dFdhh - Πλ_p
-            Σλ = inv(-dFdhh)
+            dFdλ = dFdλ - Πλ_p*ϵ_λ
+            dFdλλ = dFdλλ - Πλ_p
+            Σλ = inv(-dFdλλ)
 
-            t = exp(4 - spm_logdet(dFdhh)/length(λ))
+            t = exp(4 - spm_logdet(dFdλλ)/length(λ))
             # E-Step: update
             if t > exp(16)
-                dλ = -real(inv(dFdhh) * dFdh)
+                dλ = -real(inv(dFdλλ) * dFdλ)
             else
-                dλ = real(expv(t, dFdhh, inv(dFdhh)*dFdh) -inv(dFdhh)*dFdh)   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                idFdλλ = inv(dFdλλ)
+                dλ = real(expv(t, dFdλλ, idFdλλ*dFdλ) - idFdλλ*dFdλ)   # (expm(dfdx*t) - I)*inv(dfdx)*f
             end
 
             dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
             λ = λ + dλ
 
-            dF = dot(dFdh, dλ)
+            dF = dot(dFdλ, dλ)
             # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
             # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
             # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.

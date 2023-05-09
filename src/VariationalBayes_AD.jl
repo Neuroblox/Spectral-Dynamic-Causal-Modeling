@@ -464,8 +464,8 @@ end
         P = zeros(eltype(J), size(Q))
         PΣ = zeros(eltype(J), size(Q))
         JPJ = zeros(real(eltype(J)), size(J,2), size(J,2), size(Q,3))
-        dFdh = zeros(eltype(J), nh)
-        dFdhh = zeros(real(eltype(J)), nh, nh)
+        dFdλ = zeros(eltype(J), nh)
+        dFdλλ = zeros(real(eltype(J)), nh, nh)
         for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
             iΣ = zeros(eltype(J), ny, ny)
             for i = 1:nh
@@ -481,31 +481,31 @@ end
                 JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above), what's the rational?
             end
             for i = 1:nh
-                dFdh[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
+                dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
                 for j = i:nh
-                    dFdhh[i, j] = -real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2
-                    dFdhh[j, i] = dFdhh[i, j]
+                    dFdλλ[i, j] = -real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2
+                    dFdλλ[j, i] = dFdλλ[i, j]
                 end
             end
 
             ϵ_λ = λ - λμ
-            dFdh = dFdh - Πλ_p*ϵ_λ
-            dFdhh = dFdhh - Πλ_p
-            Σλ = inv(-dFdhh)
+            dFdλ = dFdλ - Πλ_p*ϵ_λ
+            dFdλλ = dFdλλ - Πλ_p
+            Σλ = inv(-dFdλλ)
 
-            t = exp(4 - spm_logdet(dFdhh)/length(λ))
+            t = exp(4 - spm_logdet(dFdλλ)/length(λ))
             # E-Step: update
             if t > exp(16)
-                dλ = -real(dFdhh \ dFdh)
+                dλ = -real(dFdλλ \ dFdλ)
             else
-                idFdhh = inv(dFdhh)
-                dλ = real(exponential!(t * dFdhh) * idFdhh*dFdh - idFdhh*dFdh)   # (expm(dfdx*t) - I)*inv(dfdx)*f ~~~ could also be done with expv but doesn't work with Dual.
+                idFdλλ = inv(dFdλλ)
+                dλ = real(exponential!(t * dFdλλ) * idFdλλ*dFdλ - idFdλλ*dFdλ)   # (expm(dfdx*t) - I)*inv(dfdx)*f ~~~ could also be done with expv but doesn't work with Dual.
             end
 
             dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
             λ = λ + dλ
 
-            dF = dot(dFdh, dλ)
+            dF = dot(dFdλ, dλ)
             # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
             # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
             # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.

@@ -13,6 +13,7 @@ using BenchmarkTools
 # 3. how do we deal with ADVI problem?
 # 4. maybe also @views
 # 5. how about removing bound checks?
+# 6. should I go through the functions and declare types?
 
 
 
