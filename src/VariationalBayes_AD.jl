@@ -273,7 +273,7 @@ end
     nd = size(θμ, 1)
 
     # define function that implements spectra given in equation (2) of "A DCM for resting state fMRI".
-
+    Main.foo[] = α, β, γ
     # neuronal fluctuations (Gu) (1/f or AR(1) form)
     G = w.^(-exp(β[1]))   # spectrum of hidden dynamics
     G /= sum(G)
@@ -416,15 +416,12 @@ end
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
     for k = 1:niter
         state.iter = k
-
+        # @show "before f"
         f = f_prep(μθ_po)
-        # jac_prototype = Array{Dual{ForwardDiff.Tag{NeurobloxTag, ComplexF64}, ComplexF64, 12}}(undef, ny, np)
-        # @show typeof(jac_prototype)
-        # dfdp = forwarddiff_color_jacobian(f_prep, μθ_po) * V
-        # forwarddiff_color_jacobian(f,x,ForwardColorJacCache(f,x,chunksize,tag = NeurobloxTag()),nothing)
+        # @show "after f"
+        # Main.backintime[] = μθ_po, k
         dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
-        # dfdp = Complex.((p -> p.value).(real(dfdp)), (p -> p.value).(imag(dfdp)))
-
+        # Main.foo[] = dfdp
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
@@ -450,7 +447,7 @@ end
                 # check for stability
                 norm_dfdp = matlab_norm(dfdp, Inf);
                 revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
-        
+
                 # break
                 if ~revert
                     break
@@ -464,26 +461,25 @@ end
 
 
         ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
+        P = zeros(eltype(J), size(Q))
+        PΣ = zeros(eltype(J), size(Q))
+        JPJ = zeros(real(eltype(J)), size(J,2), size(J,2), size(Q,3))
+        dFdh = zeros(eltype(J), nh)
+        dFdhh = zeros(real(eltype(J)), nh, nh)
         for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
             iΣ = zeros(eltype(J), ny, ny)
             for i = 1:nh
                 iΣ .+= Q[:,:,i]*exp(λ[i])
             end
 
-            Σ = inv(iΣ)             # Julia requires conversion to dense matrix before inversion so just use dense from the get-go
             Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
             Σθ = inv(Pp + Πθ_p)
 
-            P = zeros(eltype(J), size(Q))
-            PΣ = zeros(eltype(J), size(Q))
-            JPJ = zeros(real(eltype(J)), size(Pp,1), size(Pp,2), size(Q,3))
             for i = 1:nh
                 P[:,:,i] = Q[:,:,i]*exp(λ[i])
-                PΣ[:,:,i] = P[:,:,i] * Σ
+                PΣ[:,:,i] = iΣ \ P[:,:,i]
                 JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above), what's the rational?
             end
-            dFdh = zeros(eltype(J), nh)
-            dFdhh = zeros(real(eltype(J)), nh, nh)
             for i = 1:nh
                 dFdh[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
                 for j = i:nh

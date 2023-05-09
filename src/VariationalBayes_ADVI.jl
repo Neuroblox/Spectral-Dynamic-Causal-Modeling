@@ -8,6 +8,9 @@ using ToeplitzMatrices
 using ExponentialUtilities
 using ForwardDiff
 using Plots
+using Random
+Random.seed!(3);
+
 
 include("hemodynamic_response.jl")
 include("VariationalBayes_AD.jl")
@@ -17,7 +20,7 @@ function Base.vec(x::T) where (T <: Real)
     return x*ones(1)
 end
 
-vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions2.mat");
+vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions3.mat");
 y = vars["data"];
 dt = vars["dt"];
 w = vec(vars["Hz"]);
@@ -57,6 +60,9 @@ dim = size(x, 1);
     csd_real ~ MvNormal(real(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
     csd_imag ~ MvNormal(imag(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
 end
+
+foo = Ref{Any}()
+backintime = Ref{Any}()
 
 # ADVI
 modelEMn = fitADVI_csd(y_csd)

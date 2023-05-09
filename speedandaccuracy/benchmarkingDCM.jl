@@ -1,9 +1,3 @@
-# using Profile
-# using ProfileView
-# using StatProfilerHTML
-using BenchmarkTools
-# using LaTeXStrings
-
 using LinearAlgebra
 using MKL
 using FFTW
@@ -14,11 +8,11 @@ using ForwardDiff
 
 using Turing
 using Distributions
-
 using Flux
 
 ### a few packages relevant for speed tests and profiling ###
 using Serialization
+using StatProfilerHTML
 
 
 # simple dispatch for vec to deal with 1xN matrices
@@ -208,9 +202,10 @@ end
 # iter = 20
 
 
-### Speedtest - note that the above then needs to be defined within a function ###
-# speedtest(vars)
-n = 4
+### Profiling ###
+include("../src/VariationalBayes_AD.jl")
+
+n = 3
 vars = matread("speedandaccuracy/matlab0.01_" * string(n) *"regions.mat");
 y = vars["data"];
 dt = vars["dt"];
@@ -256,5 +251,5 @@ param = [p; reshape(A, dim^2); C; lntransit; lndecay; lnϵ; lnα[1]; lnβ[1]; ln
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 priors = [Πθ_p, Πλ_p, λμ, Q];
 variationalbayes(x, y_csd, freqs, V, param, priors, 26)
+
 @profilehtml results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)
-ProfileView.@profview results = variationalbayes(x, y_csd, freqs, V, param, priors, 26)

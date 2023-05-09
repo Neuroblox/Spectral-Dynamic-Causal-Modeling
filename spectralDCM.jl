@@ -5,6 +5,15 @@ using ToeplitzMatrices
 using MAT
 using ExponentialUtilities
 using ForwardDiff
+using BenchmarkTools
+
+# Questions for Chris:
+# 1. what does it mean to cache *
+# 2. cached zeros just by moving them one loop out
+# 3. how do we deal with ADVI problem?
+# 4. maybe also @views
+# 5. how about removing bound checks?
+
 
 
 # simple dispatch for vec to deal with 1xN matrices
@@ -13,9 +22,11 @@ function Base.vec(x::T) where (T <: Real)
 end
 
 include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                      # multivariate auto-regressive model functions
 
+foo = Ref{Any}()
+backintime = Ref{Any}()
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
 vars = matread("speedandaccuracy/matlab0.01_3regions.mat");
@@ -66,3 +77,47 @@ priors = [Πθ_p, Πλ_p, λμ, Q];
 
 ### Compute the DCM ###
 @time results = variationalbayes(x, y_csd, freqs, V, param, priors, 128)
+
+
+# @benchmark bar1 = LinearAlgebra.eigen(J_tot)
+# function test(J)
+#     F = DifferentiableEigen.eigen(J_tot)
+#     Λ = DifferentiableEigen.arr2Comp(F[1], size(J_tot, 1))
+#     V = DifferentiableEigen.arr2Comp(F[2], size(J_tot))
+#     return Eigen(Λ, V)
+# end
+# @benchmark bar2 = test(J_tot)
+
+N = 100
+
+function test1()
+    for i = 1:100
+        for j = 1:10
+            A = zeros(Float64, N, N, 10)
+            A[:,:,j] = rand(N, N)
+        end
+    end
+end
+
+function test2()
+    A = zeros(Int, N, N, 10)
+    for i = 1:100
+        A = Float64.(A)
+        for j = 1:10
+            A[:,:,j] = rand(N, N)
+        end
+    end
+end
+
+function test3()
+    for i = 1:100
+        A = zeros(Float64, N, N, 10)
+        for j = 1:10
+            A[:,:,j] = rand(N, N)
+        end
+    end
+end
+
+@benchmark test1()
+@benchmark test2()
+@benchmark test3()
