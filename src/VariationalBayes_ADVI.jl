@@ -67,11 +67,16 @@ backintime = Ref{Any}()
 # ADVI
 modelEMn = fitADVI_csd(y_csd)
 Turing.setadbackend(:forwarddiff)
-advi = ADVI(10, 1000)
+
+ADVIsteps = 1000
+ADVIsamples = 10
+advi = ADVI(ADVIsamples, ADVIsteps) 
 setchunksize(8)
 q = vi(modelEMn, advi);
+iter = 1
+serialize("ADVIdata" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * ".dat", (q, advi, model))
 
-chain = sample(modelEMn, NUTS(), 1000);
+# chain = sample(modelEMn, NUTS(), 1000);
 
 # sampling
 # z = rand(q, 10000);
