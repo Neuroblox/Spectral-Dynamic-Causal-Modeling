@@ -3,13 +3,13 @@
 # the following two precision matrices will not be updated by the code,
 # they belong to the assumed prior distribution p (fixed, but what if it isn't
 # the ground truth?)
-ipC = Πθ_p   # precision matrix of prior of parameters p(θ)
-ihC = Πλ_p   # precision matrix of prior of hyperparameters p(λ)
+ipC = Πθ_pr   # precision matrix of prior of parameters p(θ)
+ihC = Πλ_pr   # precision matrix of prior of hyperparameters p(λ)
 
 Variational distribution parameters:
-pE, Ep = θμ, μθ   # prior expectation of parameters (q(θ))
+pE, Ep = μθ_pr, μθ   # prior expectation of parameters (q(θ))
 pC, Cp = θΣ, Σθ   # prior covariance of parameters (q(θ))
-hE, Eh = λμ, μλ   # prior expectation of hyperparameters (q(λ))
+hE, Eh = μλ_pr, μλ   # prior expectation of hyperparameters (q(λ))
 hC, Ch = λΣ, Σλ   # prior covariance of hyperparameters (q(λ))
 
 Σ, iΣ  # data covariance matrix (likelihood), and its inverse (precision of likelihood - use Π only for those precisions that don't change)
@@ -22,7 +22,7 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 
 
 # Define priors etc.
-# Q, θμ, θΣ, λμ, λΣ
+# Q, μθ_pr, θΣ, μλ_pr, λΣ
 
 # pE.A = A/128; θμ?
 using LinearAlgebra: Eigen
@@ -273,9 +273,9 @@ end
     nd = size(θμ, 1)
 
     # define function that implements spectra given in equation (2) of "A DCM for resting state fMRI".
-    Main.foo[] = α, β, γ
+    # Main.foo[] = α, β, γ
     # neuronal fluctuations (Gu) (1/f or AR(1) form)
-    G = w.^(-exp(β[1]))   # spectrum of hidden dynamics
+    G = w.^(-exp(α[2]))   # spectrum of hidden dynamics
     G /= sum(G)
     Gu = zeros(eltype(G), nw, nd, nd)
     Gn = zeros(eltype(G), nw, nd, nd)
@@ -293,7 +293,7 @@ end
     # global components
     for i = 1:nd
         for j = i:nd
-            Gn[:,i,j] .+= exp(α[2])*G
+            Gn[:,i,j] .+= exp(β[1])*G
             Gn[:,j,i] = Gn[:,i,j]
         end
     end
@@ -384,23 +384,52 @@ mutable struct vb_state
     Σθ::Matrix{Float64}
 end
 
-@views function variationalbayes(x, y, w, V, param, priors, niter)
+function vecparam(param::OrderedDict{T1, T2}) where {T1, T2}
+    flatparam = Float64[]
+    for v in values(param)
+        if (typeof(v) <: Array)
+            for vv in v
+                push!(flatparam, vv)
+            end
+        else
+            push!(flatparam, v)
+        end
+    end
+    return flatparam
+end
+
+function unvecparam(vals, param::OrderedDict{T1, T2}) where {T1, T2}
+    iter = 1
+    paramnewvals = copy(param)
+    for (k, v) in param
+        if (typeof(v) <: Array)
+            paramnewvals[k] = vals[iter:iter+length(v)-1]
+            iter += length(v)
+        else
+            paramnewvals[k] = vals[iter]
+            iter += 1
+        end
+    end
+    return paramnewvals
+end
+
+
+@views function variationalbayes(x, y, w, V, p, priors, niter)
     # extract priors
-    Πθ_p = priors[1]
-    Πλ_p = priors[2]
-    λμ = priors[3]
-    Q = priors[4]
+    Πθ_pr = priors[:Σ][:Πθ_pr]
+    Πλ_pr = priors[:Σ][:Πλ_pr]
+    μλ_pr = priors[:Σ][:μλ_pr]
+    Q = priors[:Σ][:Q]
 
     # prep stuff
-    p = Int(param[1])
-    θμ = param[2:end]          # note: μθ_po is posterior and θμ is prior
+    μθ_pr = vecparam(priors[:μ])      # note: μθ_po is posterior and μθ_pr is prior
     np = size(V, 2)            # number of parameters
     ny = length(y)             # total number of response variables
     nq = 1
     nh = size(Q,3)             # number of precision components (this is the same as above, but may differ)
     λ = 8 * ones(nh)
-    ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
-    μθ_po = θμ + V*ϵ_θ
+    ϵ_θ = zeros(np)  # M.P - μθ_pr # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with μθ_pr above.
+    μθ_po = μθ_pr + V*ϵ_θ
  
     revert = false
     f_prep = param -> csd_fmri_mtf(x, w, p, param)
@@ -411,17 +440,15 @@ end
     previous_F = F
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
-    state = vb_state(0, F, λ, zeros(np), μθ_po, inv(Πθ_p))
-
+    state = vb_state(0, F, λ, zeros(np), μθ_po, inv(Πθ_pr))
+    dfdp = zeros(ComplexF64, length(w)*size(x,1)^2, np)
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
     for k = 1:niter
         state.iter = k
-        # @show "before f"
-        f = f_prep(μθ_po)
-        # @show "after f"
-        # Main.backintime[] = μθ_po, k
+        # J_test = JacVec(f_prep, μθ_po)
+        # dfdp = stack(J_test*v for v in eachcol(V))
+        # Main.foo[] = f_prep, μθ_po, V
         dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
-        # Main.foo[] = dfdp
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
@@ -438,10 +465,10 @@ end
                     ϵ_θ = state.ϵ_θ + expv(t, dFdpp, dFdpp \ dFdp) - dFdpp \ dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
                 end
 
-                μθ_po = θμ + V*ϵ_θ
+                μθ_po = μθ_pr + V*ϵ_θ
 
-                f = f_prep(μθ_po)
-                # dfdp = forwarddiff_color_jacobian(f_prep, μθ_po) * V
+                # J_test = JacVec(f_prep, μθ_po)
+                # dfdp = stack(J_test*v for v in eachcol(V))
                 dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
 
                 # check for stability
@@ -455,10 +482,9 @@ end
             end
         end
 
-
+        f = f_prep(μθ_po)
         ϵ = reshape(y - f, ny)                   # error value
         J = - dfdp   # Jacobian, unclear why we have a minus sign. Helmut: comes from deriving a Gaussian. 
-
 
         ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
         P = zeros(eltype(J), size(Q))
@@ -473,7 +499,7 @@ end
             end
 
             Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
-            Σθ = inv(Pp + Πθ_p)
+            Σθ = inv(Pp + Πθ_pr)
 
             for i = 1:nh
                 P[:,:,i] = Q[:,:,i]*exp(λ[i])
@@ -488,9 +514,9 @@ end
                 end
             end
 
-            ϵ_λ = λ - λμ
-            dFdλ = dFdλ - Πλ_p*ϵ_λ
-            dFdλλ = dFdλλ - Πλ_p
+            ϵ_λ = λ - μλ_pr
+            dFdλ = dFdλ - Πλ_pr*ϵ_λ
+            dFdλλ = dFdλλ - Πλ_pr
             Σλ = inv(-dFdλλ)
 
             t = exp(4 - spm_logdet(dFdλλ)/length(λ))
@@ -517,8 +543,8 @@ end
         ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
         L = zeros(real(eltype(iΣ)), 3)
         L[1] = (real(logdet(iΣ))*nq - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
-        L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ, Πθ_p, ϵ_θ))/2
-        L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2
+        L[2] = (logdet(Πθ_pr * Σθ) - dot(ϵ_θ, Πθ_pr, ϵ_θ))/2
+        L[3] = (logdet(Πλ_pr * Σλ) - dot(ϵ_λ, Πλ_pr, ϵ_λ))/2
         F = sum(L)
 
         if k == 1
@@ -533,8 +559,8 @@ end
             state.μθ_po = μθ_po
             state.F = F
             # Conditional update of gradients and curvature
-            dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ    # check sign
-            dFdpp = -real(J' * iΣ * J) - Πθ_p
+            dFdp  = -real(J' * iΣ * ϵ) - Πθ_pr * ϵ_θ    # check sign
+            dFdpp = -real(J' * iΣ * J) - Πθ_pr
             # decrease regularization
             v = min(v + 1/2, 4);
         else
@@ -554,7 +580,7 @@ end
         end
 
         ϵ_θ += dθ
-        μθ_po = θμ + V*ϵ_θ
+        μθ_po = μθ_pr + V*ϵ_θ
         dF = dot(dFdp, dθ);
 
         # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times

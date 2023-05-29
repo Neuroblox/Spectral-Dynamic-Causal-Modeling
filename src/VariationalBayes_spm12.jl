@@ -7,13 +7,13 @@ using OrderedCollections
 # the following two precision matrices will not be updated by the code,
 # they belong to the assumed prior distribution p (fixed, but what if it isn't
 # the ground truth?)
-ipC = Πθ_p   # precision matrix of prior of parameters p(θ)
-ihC = Πλ_p   # precision matrix of prior of hyperparameters p(λ)
+ipC = Πθ_pr   # precision matrix of prior of parameters p(θ)
+ihC = Πλ_pr   # precision matrix of prior of hyperparameters p(λ)
 
 Variational distribution parameters:
-pE, Ep = θμ, μθ   # prior and posterior expectation of parameters (q(θ))
+pE, Ep = μθ_pr, μθ_po   # prior and posterior expectation of parameters (q(θ))
 pC, Cp = θΣ, Σθ   # prior and posterior covariance of parameters (q(θ))
-hE, Eh = λμ, μλ   # prior and posterior expectation of hyperparameters (q(λ))
+hE, Eh = μλ_pr, μλ   # prior and posterior expectation of hyperparameters (q(λ))
 hC, Ch = λΣ, Σλ   # prior and posterior covariance of hyperparameters (q(λ))
 
 Σ, iΣ  # data covariance matrix (likelihood), and its inverse (precision of likelihood - use Π only for those precisions that don't change)
@@ -27,7 +27,7 @@ Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
 
 
 # Define priors etc.
-# Q, θμ, θΣ, λμ, λΣ
+# Q, θμ, θΣ, μλ_pr, λΣ
 
 # pE.A = A/128; θμ
 
@@ -272,10 +272,10 @@ function csd_approx(w, sts, derivatives, param)
     # priors of spectral parameters
     # ln(α) and ln(β), region specific fluctuations: ln(γ)
     nw = length(w)
-    nd = size(x, 1)
     α = param[:lnα]
     β = param[:lnβ]
     γ = param[:lnγ]
+    nd = length(γ)
     # define function that implements spectra given in equation (2) of the paper "A DCM for resting state fMRI".
 
     # neuronal fluctuations, intrinsic noise (Gu) (1/f or AR(1) form)
@@ -561,14 +561,16 @@ function unvecparam(vals, param::OrderedDict{Any,Any})
     return paramnewvals
 end
 
-
-function variationalbayes(sts, y, derivatives, w, V, p, param, priors, niter)    # relates to spm_nlsi_GN.m
+"""
+    MTK version
+"""
+function variationalbayes(sts, y, derivatives, w, V, p, priors, niter)    # relates to spm_nlsi_GN.m
     # extract priors
-    Πθ_pr = priors[:Πθ_pr]
-    Πλ_pr = priors[:Πλ_pr]
-    μλ_pr = priors[:μλ_pr]
-    Q = priors[:Q]
-    μθ_pr = vecparam(param)            # note: μθ is posterior and θμ is prior
+    Πθ_pr = priors[:Σ][:Πθ_pr]
+    Πλ_pr = priors[:Σ][:Πλ_pr]
+    μλ_pr = priors[:Σ][:μλ_pr]
+    Q = priors[:Σ][:Q]
+    μθ_pr = vecparam(priors[:μ])            # note: μθ_po is posterior and θμ is prior
 
     # prep stuff
     np = size(V, 2)            # number of parameters
@@ -576,7 +578,7 @@ function variationalbayes(sts, y, derivatives, w, V, p, param, priors, niter)   
     nq = 1
     nh = size(Q, 3)            # number of precision components/hyper parameters
     λ = 8*ones(nh)
-    ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
+    ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ_po with θμ above.
     μθ_po = μθ_pr + V*ϵ_θ
 
     dx = exp(-8)
@@ -595,10 +597,198 @@ function variationalbayes(sts, y, derivatives, w, V, p, param, priors, niter)   
     for k = 1:niter
         state.iter = k
 
-        dfdθ, f = diff(V, dx, f_prep, unvecparam(μθ_po, param));
+        dfdθ, f = diff(V, dx, f_prep, unvecparam(μθ_po, priors[:μ]));
         dfdθ = transpose(reshape(dfdθ, np, ny))
-        norm_dfdθ = matlab_norm(dfdθ, Inf);
+        norm_dfdθ = matlab_norm(dfdθ, Inf);      # NB that the norm in Julia is different from MATLAB. For consistency with SPM12 we reimplemented it here
         revert = isnan(norm_dfdθ) || norm_dfdθ > exp(32);
+
+        if revert && k > 1
+            for i = 1:4
+                # reset expansion point and increase regularization
+                v = min(v - 2, -4);
+                t = exp(v - logdet(dFdθθ)/np)
+
+                # E-Step: update
+                if t > exp(16)
+                    ϵ_θ = state.ϵ_θ - dFdθθ\dFdθ    # -inv(dfdx)*f
+                else
+                    idFdθθ = inv(dFdθθ)
+                    ϵ_θ = state.ϵ_θ + expv(t, dFdθθ, idFdθθ*dFdθ) - idFdθθ*dFdθ   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                end
+
+                μθ_po = μθ_pr + V*ϵ_θ
+
+                dfdθ, f = diff(V, dx, f_prep, unvecparam(μθ_po, priors[:μ]));
+                dfdθ = transpose(reshape(dfdθ, np, ny))
+
+                # check for stability
+                norm_dfdθ = matlab_norm(dfdθ, Inf);
+                revert = isnan(norm_dfdθ) || norm_dfdθ > exp(32);
+
+                # break
+                if ~revert
+                    break
+                end
+            end
+        end
+
+
+        ϵ = reshape(y - f, ny)    # error value
+        J = - dfdθ   # Jacobian, unclear why we have a minus sign. Helmut: comes from deriving a Gaussian. 
+
+
+        ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
+        for m = 1:8   # 8 seems arbitrary. This is probably because optimization falls often into a periodic orbit. ToDo: Issue #8
+            iΣ = zeros(ComplexF64, ny, ny)
+            for i = 1:nh
+                iΣ .+= Q[:,:,i]*exp(λ[i])
+            end
+            Σ = inv(iΣ)               # Julia requires conversion to dense matrix before inversion so just use dense to begin with
+            Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
+            Σθ = inv(Pp + Πθ_pr)
+
+            P = similar(Q)
+            PΣ = similar(Q)
+            JPJ = zeros(size(Pp,1), size(Pp,2), size(Q,3))
+            for i = 1:nh
+                P[:,:,i] = Q[:,:,i]*exp(λ[i])
+                PΣ[:,:,i] = P[:,:,i] * Σ
+                JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above), what's the rational?
+            end
+
+            for i = 1:nh
+                dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ,P[:,:,i],ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
+                for j = i:nh
+                    dFdλλ[i, j] = - real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2     # eps = randn(sizen), (eps' * Ai) * (Aj * eps)
+                    dFdλλ[j, i] = dFdλλ[i, j]
+                end
+            end
+
+            ϵ_λ = λ - μλ_pr
+            dFdλ = dFdλ - Πλ_pr*ϵ_λ
+            dFdλλ = dFdλλ - Πλ_pr
+            Σλ = inv(-dFdλλ)
+
+            t = exp(4 - spm_logdet(dFdλλ)/length(λ))
+            # E-Step: update
+            if t > exp(16)
+                dλ = -real(inv(dFdλλ) * dFdλ)
+            else
+                idFdλλ = inv(dFdλλ)
+                dλ = real(expv(t, dFdλλ, idFdλλ*dFdλ) - idFdλλ*dFdλ)   # (expm(dfdx*t) - I)*inv(dfdx)*f
+            end
+
+            dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
+            λ = λ + dλ
+
+            dF = dot(dFdλ, dλ)
+            # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
+            # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
+            # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
+            if real(dF) < 1e-2
+                break
+            end
+        end
+
+        ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
+        L = zeros(3)
+        L[1] = (real(logdet(iΣ))*nq  - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
+        L[2] = (logdet(Πθ_pr * Σθ) - dot(ϵ_θ, Πθ_pr, ϵ_θ))/2
+        L[3] = (logdet(Πλ_pr * Σλ) - dot(ϵ_λ, Πλ_pr, ϵ_λ))/2;
+        F = sum(L);
+
+        if k == 1
+            F0 = F
+        end
+
+        if F > state.F || k < 3
+            # accept current state
+            state.F = F
+            state.ϵ_θ = ϵ_θ
+            state.λ = λ
+            state.Σθ = Σθ
+            state.μθ_po = μθ_po
+            # Conditional update of gradients and curvature
+            dFdθ  = -real(J' * iΣ * ϵ) - Πθ_pr * ϵ_θ
+            dFdθθ = -real(J' * iΣ * J) - Πθ_pr
+            # decrease regularization
+            v = min(v + 1/2,4);
+        else
+            # reset expansion point
+            ϵ_θ = state.ϵ_θ
+            λ = state.λ
+            # and increase regularization
+            v = min(v - 2,-4);
+        end
+
+        # E-Step: update
+        t = exp(v - spm_logdet(dFdθθ)/np)
+        if t > exp(16)
+            dθ = -inv(dFdθθ)*dFdθ    # -inv(dfdx)*f
+        else
+            dθ = exp(t * dFdθθ) * inv(dFdθθ)*dFdθ - inv(dFdθθ)*dFdθ   # (expm(dfdx*t) - I)*inv(dfdx)*f
+        end
+
+        ϵ_θ += dθ
+        μθ_po = μθ_pr + V*ϵ_θ
+        dF  = dot(dFdθ, dθ);
+
+        # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times
+        print("iteration: ", k, " - F:", state.F - F0, " - dF predicted:", dF, "\n")
+        criterion = vcat(dF < 1e-1, criterion[1:end - 1]);
+        if all(criterion)
+            print("convergence\n")
+            break
+        end
+    end
+    print("iterations terminated\n")
+    state.F = F
+    state.Σθ = V*Σθ*V'
+    state.μθ_po = μθ_po
+    return state
+end
+
+"""
+    SPM12 version
+"""
+function variationalbayes(x, y, w, V, p, priors, niter)    # relates to spm_nlsi_GN.m
+    Πθ_pr = priors[:Σ][:Πθ_pr]
+    Πλ_pr = priors[:Σ][:Πλ_pr]
+    μλ_pr = priors[:Σ][:μλ_pr]
+    Q = priors[:Σ][:Q]
+
+    # prep stuff
+    μθ_pr = vecparam(priors[:μ])      # note: μθ_po is posterior and μθ_pr is prior
+    np = size(V, 2)            # number of parameters
+    ny = length(y)             # total number of response variables
+    # ns = size(y, 1)            # number of samples
+    # nr = ny÷ns                 # number of response components
+    nq = 1
+    nh = size(Q,3)             # number of precision components (this is the same as above, but may differ)
+    λ = 8 * ones(nh)
+    ϵ_θ = zeros(np)  # M.P - μθ_pr # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ_po with μθ_pr above.
+    μθ_po = μθ_pr + V*ϵ_θ
+
+    dx = exp(-8)
+    revert = false
+    f_prep = param -> csd_fmri_mtf(x, w, p, param)
+
+    # state variable
+    F = -Inf
+    F0 = F
+    v = -4   # log ascent rate
+    criterion = [false, false, false, false]
+    state = vb_state(0, F, λ, zeros(np), μθ_po, inv(Πθ_pr))
+    local ϵ_λ, iΣ, Σλ, Σθ, dFdθθ, dFdθ
+    dFdλ = zeros(ComplexF64, nh)
+    dFdλλ = zeros(Float64, nh, nh)
+    for k = 1:niter
+        state.iter = k
+
+        dfdθ, f = diff(V, dx, f_prep, μθ_po);
+        dfdθ = transpose(reshape(dfdθ, np, ny))
+        norm_dfdp = matlab_norm(dfdθ, Inf);
+        revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
         if revert && k > 1
             for i = 1:4
@@ -608,19 +798,20 @@ function variationalbayes(sts, y, derivatives, w, V, p, param, priors, niter)   
 
                 # E-Step: update
                 if t > exp(16)
-                    ϵ_θ = state.ϵ_θ - inv(dFdθθ)*dFdθ    # -inv(dfdx)*f
+                    ϵ_θ = state.ϵ_θ - dFdθθ\dFdθ    # -inv(dfdx)*f
                 else
-                    ϵ_θ = state.ϵ_θ + expv(t, dFdθθ, inv(dFdθθ)*dFdθ) -inv(dFdθθ)*dFdθ   # (expm(dfdx*t) - I)*inv(dfdx)*f
+                    idFdθθ = inv(dFdθθ)
+                    ϵ_θ = state.ϵ_θ + expv(t, dFdθθ, idFdθθ*dFdθ) - idFdθθ*dFdθ   # (expm(dfdx*t) - I)*inv(dfdx)*f
                 end
 
                 μθ_po = μθ_pr + V*ϵ_θ
 
-                dfdθ, f = diff(V, dx, f_prep, unvecparam(μθ_po, param));
+                dfdθ, f = diff(V, dx, f_prep, μθ_po);
                 dfdθ = transpose(reshape(dfdθ, np, ny))
 
                 # check for stability
-                norm_dfdθ = matlab_norm(dfdθ, Inf);
-                revert = isnan(norm_dfdθ) || norm_dfdθ > exp(32);
+                norm_dfdp = matlab_norm(dfdθ, Inf);
+                revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
                 # break
                 if ~revert
@@ -721,9 +912,10 @@ function variationalbayes(sts, y, derivatives, w, V, p, param, priors, niter)   
         # E-Step: update
         t = exp(v - spm_logdet(dFdθθ)/np)
         if t > exp(16)
-            dθ = - inv(dFdθθ)*dFdθ    # -inv(dfdx)*f
+            dθ = - dFdθθ\dFdθ    # -inv(dfdx)*f
         else
-            dθ = exp(t * dFdθθ) * inv(dFdθθ)*dFdθ - inv(dFdθθ)*dFdθ   # (expm(dfdx*t) - I)*inv(dfdx)*f
+            idFdθθ = inv(dFdθθ)
+            dθ = exp(t * dFdθθ) * idFdθθ*dFdθ - idFdθθ*dFdθ   # (expm(dfdx*t) - I)*inv(dfdx)*f
         end
 
         ϵ_θ += dθ
@@ -742,191 +934,6 @@ function variationalbayes(sts, y, derivatives, w, V, p, param, priors, niter)   
     state.F = F
     state.Σθ = V*Σθ*V'
     state.μθ_po = μθ_po
-    return state
-end
-
-function variationalbayes(x, y, w, V, param, priors, niter)    # relates to spm_nlsi_GN.m
-    Πθ_p = priors[1]
-    Πλ_p = priors[2]
-    λμ = priors[3]
-    Q = priors[4]
-
-    # prep stuff
-    p = Int(param[1])
-    θμ = param[2:end]          # note: μθ is posterior and θμ is prior
-    np = size(V, 2)            # number of parameters
-    ny = length(y)             # total number of response variables
-    # ns = size(y, 1)            # number of samples
-    # nr = ny÷ns                 # number of response components
-    nq = 1
-    nh = size(Q,3)             # number of precision components (this is the same as above, but may differ)
-    λ = 8 * ones(nh)
-    ϵ_θ = zeros(np)  # M.P - θμ # still need to figure out what M.P is for. It doesn't seem to be used further down the road in nlsi_GM, only at the very beginning when p is defined first. Then replace μθ with θμ above.
-    μθ = θμ + V*ϵ_θ
-
-    dx = exp(-8)
-    revert = false
-    f_prep = param -> csd_fmri_mtf(x, w, p, param)
-
-    # state variable
-    F = -Inf
-    F0 = F
-    v = -4   # log ascent rate
-    criterion = [false, false, false, false]
-    state = vb_state(0, F, λ, zeros(np), μθ, inv(Πθ_p))
-    local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
-    dFdλ = zeros(ComplexF64, nh)
-    dFdλλ = zeros(Float64, nh, nh)
-    for k = 1:niter
-        state.iter = k
-
-        dfdp, f = diff(V, dx, f_prep, μθ);
-        dfdp = transpose(reshape(dfdp, np, ny))
-        norm_dfdp = matlab_norm(dfdp, Inf);
-        revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
-
-        if revert && k > 1
-            for i = 1:4
-                # reset expansion point and increase regularization
-                v = min(v - 2,-4);
-                t = exp(v - logdet(dFdpp)/np)
-
-                # E-Step: update
-                if t > exp(16)
-                    ϵ_θ = state.ϵ_θ - inv(dFdpp)*dFdp    # -inv(dfdx)*f
-                else
-                    ϵ_θ = state.ϵ_θ + expv(t, dFdpp, inv(dFdpp)*dFdp) -inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
-                end
-
-                μθ = θμ + V*ϵ_θ
-
-                dfdp, f = diff(V, dx, f_prep, μθ);
-                dfdp = transpose(reshape(dfdp, np, ny))
-
-                # check for stability
-                norm_dfdp = matlab_norm(dfdp, Inf);
-                revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
-
-                # break
-                if ~revert
-                    break
-                end
-            end
-        end
-
-
-        ϵ = reshape(y - f, ny)                   # error value
-        J = - dfdp   # Jacobian, unclear why we have a minus sign. Helmut: comes from deriving a Gaussian. 
-
-
-        ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
-        for m = 1:8   # 8 seems arbitrary. This is probably because optimization falls often into a periodic orbit. ToDo: Issue #8
-            iΣ = zeros(ComplexF64, ny, ny)
-            for i = 1:nh
-                iΣ .+= Q[:,:,i]*exp(λ[i])
-            end
-            Σ = inv(iΣ)               # Julia requires conversion to dense matrix before inversion so just use dense to begin with
-            Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
-            Σθ = inv(Pp + Πθ_p)
-
-            P = similar(Q)
-            PΣ = similar(Q)
-            JPJ = zeros(size(Pp,1), size(Pp,2), size(Q,3))
-            for i = 1:nh
-                P[:,:,i] = Q[:,:,i]*exp(λ[i])
-                PΣ[:,:,i] = P[:,:,i] * Σ
-                JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above), what's the rational?
-            end
-
-            for i = 1:nh
-                dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ,P[:,:,i],ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
-                for j = i:nh
-                    dFdλλ[i, j] = - real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2     # eps = randn(sizen), (eps' * Ai) * (Aj * eps)
-                    dFdλλ[j, i] = dFdλλ[i, j]
-                end
-            end
-
-            ϵ_λ = λ - λμ
-            dFdλ = dFdλ - Πλ_p*ϵ_λ
-            dFdλλ = dFdλλ - Πλ_p
-            Σλ = inv(-dFdλλ)
-
-            t = exp(4 - spm_logdet(dFdλλ)/length(λ))
-            # E-Step: update
-            if t > exp(16)
-                dλ = -real(inv(dFdλλ) * dFdλ)
-            else
-                idFdλλ = inv(dFdλλ)
-                dλ = real(expv(t, dFdλλ, idFdλλ*dFdλ) - idFdλλ*dFdλ)   # (expm(dfdx*t) - I)*inv(dfdx)*f
-            end
-
-            dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
-            λ = λ + dλ
-
-            dF = dot(dFdλ, dλ)
-            # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
-            # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
-            # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
-            if real(dF) < 1e-2
-                break
-            end
-        end
-
-        ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
-        L = zeros(3)
-        L[1] = (real(logdet(iΣ))*nq  - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
-        L[2] = (logdet(Πθ_p * Σθ) - dot(ϵ_θ, Πθ_p, ϵ_θ))/2
-        L[3] = (logdet(Πλ_p * Σλ) - dot(ϵ_λ, Πλ_p, ϵ_λ))/2;
-        F = sum(L);
-
-        if k == 1
-            F0 = F
-        end
-
-        if F > state.F || k < 3
-            # accept current state
-            state.F = F
-            state.ϵ_θ = ϵ_θ
-            state.λ = λ
-            state.Σθ = Σθ
-            state.μθ_po = μθ
-            # Conditional update of gradients and curvature
-            dFdp  = -real(J' * iΣ * ϵ) - Πθ_p * ϵ_θ
-            dFdpp = -real(J' * iΣ * J) - Πθ_p
-            # decrease regularization
-            v = min(v + 1/2,4);
-        else
-            # reset expansion point
-            ϵ_θ = state.ϵ_θ
-            λ = state.λ
-            # and increase regularization
-            v = min(v - 2,-4);
-        end
-
-        # E-Step: update
-        t = exp(v - spm_logdet(dFdpp)/np)
-        if t > exp(16)
-            dθ = - inv(dFdpp)*dFdp    # -inv(dfdx)*f
-        else
-            dθ = exp(t * dFdpp) * inv(dFdpp)*dFdp - inv(dFdpp)*dFdp   # (expm(dfdx*t) - I)*inv(dfdx)*f
-        end
-
-        ϵ_θ += dθ
-        μθ = θμ + V*ϵ_θ
-        dF  = dot(dFdp, dθ);
-
-        # convergence condition: reach a change in Free Energy that is smaller than 0.1 four consecutive times
-        print("iteration: ", k, " - F:", state.F - F0, " - dF predicted:", dF, "\n")
-        criterion = vcat(dF < 1e-1, criterion[1:end - 1]);
-        if all(criterion)
-            print("convergence\n")
-            break
-        end
-    end
-    print("iterations terminated\n")
-    state.F = F
-    state.Σθ = V*Σθ*V'
-    state.μθ_po = μθ
 
     return state
 end

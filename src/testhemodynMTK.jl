@@ -123,7 +123,7 @@ for ii = 1:nr
 end
 
 A = [1 0.5;
-    0 -1]
+     0 -1]
 
 @parameters adj[1:length(A)] = vec(A) 
 @named model = linearconnectionssymbolic(sys=regions, adj_matrix=adj, connector=connex)

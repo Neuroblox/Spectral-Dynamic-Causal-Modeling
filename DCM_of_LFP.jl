@@ -1,7 +1,7 @@
 # apply spectral DCM to LFP data
 
 using LinearAlgebra
-using MKL
+# using MKL
 using FFTW
 using ToeplitzMatrices
 using MAT
@@ -13,9 +13,9 @@ function Base.vec(x::T) where (T <: Real)
     return x*ones(1)
 end
 
-include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-include("src/mar.jl")                      # multivariate auto-regressive model functions
+include("src/hemodynamic_response.jl")        # hemodynamic and BOLD signal model
+include("src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/mar.jl")                         # multivariate auto-regressive model functions
 
 
 
@@ -145,11 +145,17 @@ for i = 1:length(idx)
     V[idx[i][1], i] = 1.0
 end
 θΣ = V'*θΣ*V;       # reduce dimension by removing columns and rows that are all 0
-Πθ_p = inv(θΣ);
 
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 
-priors = Dict(:Πθ_pr => Πθ_p, :Πλ_pr => Πλ_p, :μλ_pr => λμ, :Q => Q);
+priors = Dict(:μ => modelparam,
+              :Σ => Dict(
+                         :Πθ_pr => inv(θΣ),           # prior model parameter precision
+                         :Πλ_pr => Πλ_p,              # prior metaparameter precision
+                         :μλ_pr => vec(vars["hE"]),   # prior metaparameter mean
+                         :Q => Q                      # decomposition of model parameter covariance
+                        )
+             );
 
 ### Compute the DCM ###
-@time results = variationalbayes(sts, y_csd, derivatives, freqs, V, p, modelparam, priors, 128)
+@time results = variationalbayes(sts, y_csd, derivatives, freqs, V, p, priors, 128)

@@ -9,7 +9,7 @@ using ExponentialUtilities
 using ForwardDiff
 using Plots
 using Random
-Random.seed!(3);
+# Random.seed!(3);
 
 
 include("hemodynamic_response.jl")
