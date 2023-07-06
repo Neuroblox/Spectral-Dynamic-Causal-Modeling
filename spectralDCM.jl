@@ -64,13 +64,13 @@ Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the da
 
 priors = Dict(:μ => OrderedDict{Any, Any}(
                                              :A => vars["pE"]["A"],      # prior mean of connectivity matrix
+                                             :C => ones(Float64, nd),    # C as in equation 3. NB: whatever C is defined to be here, it will be replaced in csd_approx. Another strange thing of SPM12...
                                              :lnτ => zeros(Float64, nd), # hemodynamic transit parameter
                                              :lnκ => 0.0,                # hemodynamic decay time
                                              :lnϵ => 0.0,                # BOLD signal ratio between intra- and extravascular signal
                                              :lnα => [0.0, 0.0],         # intrinsic fluctuations, ln(α) as in equation 2 of Friston et al. 2014
                                              :lnβ => [0.0, 0.0],         # global observation noise, ln(β) as above
-                                             :lnγ => zeros(Float64, nd), # region specific observation noise
-                                             :C => ones(Float64, nd)     # C as in equation 3. NB: whatever C is defined to be here, it will be replaced in csd_approx. Another strange thing of SPM12...
+                                             :lnγ => zeros(Float64, nd)  # region specific observation noise
                                             ),
               :Σ => Dict(
                          :Πθ_pr => inv(θΣ),           # prior model parameter precision

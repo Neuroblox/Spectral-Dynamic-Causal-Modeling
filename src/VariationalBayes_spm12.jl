@@ -105,9 +105,9 @@ function transferfunction_fmri(w, sts, derivatives, params)   # relates to: spm_
     A_tmp = A[[(i-1)*nd+i for i=1:nd]]
     A[[(i-1)*nd+i for i=1:nd]] -= exp.(A_tmp)/2 + A_tmp
     ∂f[idx_A] = A
-    # if I eventually need also the change of variables rather than just the derivative then here is where to fix it! 
-    dfdu = [diagm(C);
-            zeros(size(∂f, 1)-nd, length(C))]
+
+    dfdu = zeros(size(∂f, 1), length(C))
+    dfdu[CartesianIndex.([(idx[2][1], idx[1]) for idx in enumerate(idx_A[[(i-1)*nd+i for i=1:nd]])])] = C
 
     F = eigen(Symbolics.value.(∂f), sortby=nothing, permute=true)
     Λ = F.values
