@@ -135,8 +135,7 @@ function transferfunction_fmri(w, idx_A, derivatives, params)   # relates to: sp
     C = params[(6+2nd+nd^2):(5+3nd+nd^2)]
 
     C /= 16.0   # TODO: unclear why C is devided by 16 but see spm_fx_fmri.m:49
-
-    ∂f = derivatives[:∂f](params[1:(nd^2+nd+1)]...)#convert(Array{Real}, substitute(derivatives[:∂f], params))
+    ∂f = invokelatest(derivatives[:∂f], params[1:(nd^2+nd+1)]...)#convert(Array{Real}, substitute(derivatives[:∂f], params))
 
     dfdu = zeros(eltype(C), size(∂f, 1), length(C))
     dfdu[CartesianIndex.([(idx[2][1], idx[1]) for idx in enumerate(idx_A[[(i-1)*nd+i for i=1:nd]])])] = C
@@ -145,7 +144,7 @@ function transferfunction_fmri(w, idx_A, derivatives, params)   # relates to: sp
     Λ = F.values
     V = F.vectors
 
-    ∂g = derivatives[:∂g](params[end])
+    ∂g = invokelatest(derivatives[:∂g], params[end])
     # ∂g = Symbolics.value.(substitute(∂g, sts))
     dgdv = ∂g*V
     dvdu = V\dfdu
@@ -544,6 +543,7 @@ MTK Version
 
     # prep stuff
     μθ_pr = vecparam(priors[:μ])      # note: μθ_po is posterior and μθ_pr is prior
+    nd = size(y,2)
     np = size(V, 2)            # number of parameters
     ny = length(y)             # total number of response variables
     nq = 1
@@ -562,7 +562,7 @@ MTK Version
     v = -4   # log ascent rate
     criterion = [false, false, false, false]
     state = vb_state(0, F, λ, zeros(np), μθ_po, inv(Πθ_pr))
-    dfdp = zeros(ComplexF64, length(w)*size(x,1)^2, np)
+    dfdp = zeros(ComplexF64, length(w)*nd^2, np)
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
     for k = 1:niter
         state.iter = k
