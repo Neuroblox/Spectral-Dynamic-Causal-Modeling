@@ -135,7 +135,7 @@ function transferfunction_fmri(w, idx_A, derivatives, params)   # relates to: sp
     C = params[(6+2nd+nd^2):(5+3nd+nd^2)]
 
     C /= 16.0   # TODO: unclear why C is devided by 16 but see spm_fx_fmri.m:49
-    ∂f = invokelatest(derivatives[:∂f], params[1:(nd^2+nd+1)]...)#convert(Array{Real}, substitute(derivatives[:∂f], params))
+    ∂f = derivatives[:∂f](params[1:(nd^2+nd+1)]...)#convert(Array{Real}, substitute(derivatives[:∂f], params))
 
     dfdu = zeros(eltype(C), size(∂f, 1), length(C))
     dfdu[CartesianIndex.([(idx[2][1], idx[1]) for idx in enumerate(idx_A[[(i-1)*nd+i for i=1:nd]])])] = C
@@ -144,7 +144,7 @@ function transferfunction_fmri(w, idx_A, derivatives, params)   # relates to: sp
     Λ = F.values
     V = F.vectors
 
-    ∂g = invokelatest(derivatives[:∂g], params[end])
+    ∂g = derivatives[:∂g](params[end])
     # ∂g = Symbolics.value.(substitute(∂g, sts))
     dgdv = ∂g*V
     dvdu = V\dfdu

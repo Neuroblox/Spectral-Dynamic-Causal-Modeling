@@ -21,7 +21,7 @@ include("src/mar.jl")                         # multivariate auto-regressive mod
 
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab0.01_3regions.mat");
+vars = matread("speedandaccuracy/matlab0.01_3regions.mat");
 y = vars["data"];
 nd = size(y, 2);
 dt = vars["dt"];
