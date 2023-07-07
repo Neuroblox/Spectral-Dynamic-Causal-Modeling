@@ -3,16 +3,6 @@ using MAT
 ### a few packages relevant for speed tests and profiling ###
 using Serialization
 using StatProfilerHTML
-
-
-# simple dispatch for vec to deal with 1xN matrices
-function Base.vec(x::T) where (T <: Real)
-    return x*ones(1)
-end
-
-
-module WrapperFunctions
-using RuntimeGeneratedFunctions
 using FFTW
 using ToeplitzMatrices
 using ExponentialUtilities
@@ -20,16 +10,17 @@ using ForwardDiff
 using OrderedCollections
 using LinearAlgebra
 using MKL
-RuntimeGeneratedFunctions.init(WrapperFunctions)
 
-export wrapperfunction, wrapperfunction_MTK
+
+# simple dispatch for vec to deal with 1xN matrices
+function Base.vec(x::T) where (T <: Real)
+    return x*ones(1)
+end
 
 include("../src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
 include("../src/mar.jl")                      # multivariate auto-regressive model functions
-include("../src/VariationalBayes_AD.jl")
 
-
-function wrapperfunction(vars, type, iter)
+function wrapperfunction(vars, iter)
     y = vars["data"];
     dt = vars["dt"];
     nd = size(y, 2);
@@ -84,8 +75,25 @@ function wrapperfunction(vars, type, iter)
     return results
 end
 
-function wrapperfunction_MTK(vars, type, iter)
-    # include("../src/VariationalBayes_" * type * ".jl")
+
+module MTKWrapperFunctions
+using RuntimeGeneratedFunctions
+using FFTW
+using ToeplitzMatrices
+using ExponentialUtilities
+using ForwardDiff
+using OrderedCollections
+using LinearAlgebra
+using MKL
+RuntimeGeneratedFunctions.init(MTKWrapperFunctions)
+
+export wrapperfunction_MTK
+
+include("../src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
+include("../src/mar.jl")                      # multivariate auto-regressive model functions
+include("../src/VariationalBayes_AD.jl")
+
+function wrapperfunction_MTK(vars, iter)
     y = vars["data"];
     nd = size(y, 2);
     dt = vars["dt"];
@@ -223,19 +231,19 @@ end
 
 end ### End Module WrapperFunctions
 
-using .WrapperFunctions
+using .MTKWrapperFunctions
 
 # speed comparison between different DCM implementations
 for n in 2:3
     vals = matread("speedandaccuracy/matlab0.01_" * string(n) *"regions.mat");
-    # include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-    wrapperfunction(vals, "spm12", 1)
-    t_juliaSPM = @elapsed res_spm = wrapperfunction(vals, "spm12", 128)
-    # include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-    wrapperfunction(vals, "AD", 1)
-    t_juliaAD = @elapsed res_AD = wrapperfunction(vals, "AD", 128)
-    wrapperfunction_MTK(vals, "AD", 1)
-    t_juliaMTK = @elapsed res_mtk = wrapperfunction_MTK(vals, "AD", 128)
+    include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+    wrapperfunction(vals, 1)
+    t_juliaSPM = @elapsed res_spm = wrapperfunction(vals, 128)
+    include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+    wrapperfunction(vals, 1)
+    t_juliaAD = @elapsed res_AD = wrapperfunction(vals, 128)
+    wrapperfunction_MTK(vals, 1)
+    t_juliaMTK = @elapsed res_mtk = wrapperfunction_MTK(vals, 128)
     @show t_juliaAD, t_juliaSPM, t_juliaMTK
 
     matwrite("test" * string(n) * ".mat", Dict(
