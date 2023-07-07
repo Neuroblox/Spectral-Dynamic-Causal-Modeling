@@ -8,13 +8,14 @@ using MAT
 using ExponentialUtilities
 using Serialization
 using OrderedCollections
+using StatProfilerHTML
 
 function Base.vec(x::T) where (T <: Real)
     return x*ones(1)
 end
 
 include("src/hemodynamic_response.jl")        # hemodynamic and BOLD signal model
-include("src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                         # multivariate auto-regressive model functions
 
 
@@ -53,9 +54,10 @@ for ii = 1:nd
     push!(connex, region.nmm.x)
     push!(regions, region)
 end
-
+diagelem = [(i-1)*nd+i for i in 1:nd]
 @parameters A[1:length(Adj)] = vec(Adj)
-@named model = linearconnectionssymbolic(sys=regions, adj_matrix=A, connector=connex)
+
+@named model = linearconnectionssymbolic(sys=regions, adj_matrix=[i in diagelem ? -exp(a)/2 : a for (i, a) in enumerate(A)], connector=connex)
 f = structural_simplify(model)
 jac_f = calculate_jacobian(f)
 jac_f = substitute(jac_f, Dict([p for p in parameters(f) if occursin("κ", string(p))] .=> κ))
@@ -95,7 +97,6 @@ for (i, s) in enumerate(all_s)
         grad_g_full[dim, i] = substitute(grad_g[2], statesubs[dim])
     end
 end
-derivatives = Dict(:∂f => jac_f, :∂g => grad_g_full)
 
 
 modelparam = OrderedDict{Any, Any}()
@@ -115,6 +116,12 @@ for par in parameters(bold)
     modelparam[par] = Symbolics.getdefaultval(par)
 end
 
+idx_A = findall(occursin.("A[", string.(jac_f)))
+pnames = [k for k in keys(modelparam)]
+derivatives = Dict(:∂f => eval(Symbolics.build_function(substitute(jac_f, sts), pnames[1:nd^2+nd+1]...)[1]),
+                   :∂g => eval(Symbolics.build_function(substitute(grad_g_full, sts), pnames[end])[1]))
+# derivatives = Dict(:∂f => substitute(jac_f, sts), :∂g => substitute(grad_g_full, sts))
+
 # define prior variances
 paramvariance = copy(modelparam)
 paramvariance[:C] = zeros(Float64, nd);
@@ -132,7 +139,7 @@ for (k, v) in paramvariance
         paramvariance[k] = 1/256.0;
     end
 end
-θΣ = diagm(vecparam(paramvariance))
+θΣ = diagm(vecparam(paramvariance));
 
 # depending on the definition of the priors (note that we take it from the SPM12 code), some dimensions are set to 0 and thus are not changed.
 # Extract these dimensions and remove them from the remaining computation. I find this a bit odd and further thoughts would be necessary to understand
@@ -158,4 +165,4 @@ priors = Dict(:μ => modelparam,
              );
 
 ### Compute the DCM ###
-@time results = variationalbayes(sts, y_csd, derivatives, freqs, V, p, priors, 128)
+@time results = variationalbayes(idx_A, y_csd, derivatives, freqs, V, p, priors, 128)

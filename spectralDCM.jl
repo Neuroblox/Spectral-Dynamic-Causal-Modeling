@@ -27,9 +27,6 @@ include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
 include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                      # multivariate auto-regressive model functions
 
-foo = Ref{Any}()
-# backintime = Ref{Any}()
-
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
 vars = matread("speedandaccuracy/matlab0.01_3regions.mat");
 y = vars["data"];
@@ -84,6 +81,7 @@ priors = Dict(:μ => OrderedDict{Any, Any}(
 @time results = variationalbayes(x, y_csd, freqs, V, p, priors, 128);
 
 Base.pause
+bra = ket
 
 # @benchmark bar1 = LinearAlgebra.eigen(J_tot)
 # function test(J)

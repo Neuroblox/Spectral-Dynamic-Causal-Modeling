@@ -91,30 +91,32 @@ end
 """
 transfer function for fMRI data based on MTK.
 """
-function transferfunction_fmri(w, sts, derivatives, params)   # relates to: spm_dcm_mtf.m
+function transferfunction_fmri(w, idx_A, derivatives, params)   # relates to: spm_dcm_mtf.m
 
-    C = params[:C]
+    nd = Int(sqrt(length(idx_A)))
+    C = params[(6+2nd+nd^2):(5+3nd+nd^2)]
+
     C /= 16.0   # TODO: unclear why C is devided by 16 but see spm_fx_fmri.m:49
 
     # 2. get jacobian of hemodynamics
-    ∂f = substitute(derivatives[:∂f], params)
-    ∂f = convert(Array{Real}, substitute(∂f, sts))
-    idx_A = findall(occursin.("A[", string.(derivatives[:∂f])))
-    A = ∂f[idx_A]
-    nd = Int(sqrt(length(A)))
-    A_tmp = A[[(i-1)*nd+i for i=1:nd]]
-    A[[(i-1)*nd+i for i=1:nd]] -= exp.(A_tmp)/2 + A_tmp
-    ∂f[idx_A] = A
+    # ∂f = substitute(derivatives[:∂f], params)
+    # ∂f = convert(Array{Real}, substitute(∂f, sts))
+    ∂f = derivatives[:∂f](params[1:(nd^2+nd+1)]...)#convert(Array{Real}, substitute(derivatives[:∂f], params))
+    # idx_A = findall(occursin.("A[", string.(derivatives[:∂f])))
+    # A = ∂f[idx_A]
+    # A_tmp = A[[(i-1)*nd+i for i=1:nd]]
+    # A[[(i-1)*nd+i for i=1:nd]] -= exp.(A_tmp)/2 + A_tmp
+    # ∂f[idx_A] = A
 
     dfdu = zeros(size(∂f, 1), length(C))
     dfdu[CartesianIndex.([(idx[2][1], idx[1]) for idx in enumerate(idx_A[[(i-1)*nd+i for i=1:nd]])])] = C
 
-    F = eigen(Symbolics.value.(∂f), sortby=nothing, permute=true)
+    F = eigen(∂f, sortby=nothing, permute=true)
     Λ = F.values
     V = F.vectors
 
-    ∂g = substitute(derivatives[:∂g], params)
-    ∂g = Symbolics.value.(substitute(∂g, sts))
+    ∂g = derivatives[:∂g](params[end])
+    # ∂g = Symbolics.value.(substitute(∂g, sts))
     dgdv = ∂g*V
     dvdu = pinv(V)*dfdu
 
@@ -135,6 +137,7 @@ function transferfunction_fmri(w, sts, derivatives, params)   # relates to: spm_
     end
     return S
 end
+
 """
 placeholder function that will be adapted to allow non-linear models
 """
@@ -268,14 +271,18 @@ end
     Gn in the code corresponds to Ge in the paper, i.e. the observation noise. In the code global and local components are defined, no such distinction
     is discussed in the paper. In fact the parameter γ, corresponding to local component is not present in the paper.
 """
-function csd_approx(w, sts, derivatives, param)
+function csd_approx(w, idx_A, derivatives, param)
     # priors of spectral parameters
     # ln(α) and ln(β), region specific fluctuations: ln(γ)
     nw = length(w)
-    α = param[:lnα]
-    β = param[:lnβ]
-    γ = param[:lnγ]
-    nd = length(γ)
+    nd = Int(sqrt(length(idx_A)))
+    α = param[(2+nd+nd^2):(3+nd+nd^2)]
+    β = param[(4+nd+nd^2):(5+nd+nd^2)]
+    γ = param[(6+nd+nd^2):(5+2nd+nd^2)]
+    # α = param[:lnα]
+    # β = param[:lnβ]
+    # γ = param[:lnγ]
+    # nd = length(γ)
     # define function that implements spectra given in equation (2) of the paper "A DCM for resting state fMRI".
 
     # neuronal fluctuations, intrinsic noise (Gu) (1/f or AR(1) form)
@@ -300,7 +307,7 @@ function csd_approx(w, sts, derivatives, param)
             Gn[:,j,i] = Gn[:,i,j]
         end
     end
-    S = transferfunction_fmri(w, sts, derivatives, param)   # This is K(ω) in the equations of the spectral DCM paper.
+    S = transferfunction_fmri(w, idx_A, derivatives, param)   # This is K(ω) in the equations of the spectral DCM paper.
 
     # predicted cross-spectral density
     G = zeros(ComplexF64,nw,nd,nd);
@@ -399,8 +406,8 @@ end
 """
     MTK version
 """
-function csd_fmri_mtf(freqs, p, sts, derivatives, param)   # alongside the above realtes to spm_csd_fmri_mtf.m
-    G = csd_approx(freqs, sts, derivatives, param)
+function csd_fmri_mtf(freqs, p, idx_A, derivatives, param)   # alongside the above realtes to spm_csd_fmri_mtf.m
+    G = csd_approx(freqs, idx_A, derivatives, param)
     dt = 1/(2*freqs[end])
     # the following two steps are very opaque. They are taken from the SPM code but it is unclear what the purpose of this transformation and back-transformation is
     # in particular it is also unclear why the order of the MAR is reduced by 1. My best guess is that this procedure smoothens the results.
@@ -564,7 +571,7 @@ end
 """
     MTK version
 """
-function variationalbayes(sts, y, derivatives, w, V, p, priors, niter)    # relates to spm_nlsi_GN.m
+function variationalbayes(idx_A, y, derivatives, w, V, p, priors, niter)    # relates to spm_nlsi_GN.m
     # extract priors
     Πθ_pr = priors[:Σ][:Πθ_pr]
     Πλ_pr = priors[:Σ][:Πλ_pr]
@@ -583,7 +590,7 @@ function variationalbayes(sts, y, derivatives, w, V, p, priors, niter)    # rela
 
     dx = exp(-8)
     revert = false
-    f_prep = pars -> csd_fmri_mtf(w, p, sts, derivatives, pars)
+    f_prep = pars -> csd_fmri_mtf(w, p, idx_A, derivatives, pars)
 
     # state variable
     F = -Inf
@@ -597,7 +604,8 @@ function variationalbayes(sts, y, derivatives, w, V, p, priors, niter)    # rela
     for k = 1:niter
         state.iter = k
 
-        dfdθ, f = diff(V, dx, f_prep, unvecparam(μθ_po, priors[:μ]));
+        # dfdθ, f = diff(V, dx, f_prep, unvecparam(μθ_po, priors[:μ]));
+        dfdθ, f = diff(V, dx, f_prep, μθ_po);
         dfdθ = transpose(reshape(dfdθ, np, ny))
         norm_dfdθ = matlab_norm(dfdθ, Inf);      # NB that the norm in Julia is different from MATLAB. For consistency with SPM12 we reimplemented it here
         revert = isnan(norm_dfdθ) || norm_dfdθ > exp(32);
@@ -618,7 +626,8 @@ function variationalbayes(sts, y, derivatives, w, V, p, priors, niter)    # rela
 
                 μθ_po = μθ_pr + V*ϵ_θ
 
-                dfdθ, f = diff(V, dx, f_prep, unvecparam(μθ_po, priors[:μ]));
+                # dfdθ, f = diff(V, dx, f_prep, unvecparam(μθ_po, priors[:μ]));
+                dfdθ, f = diff(V, dx, f_prep, μθ_po);
                 dfdθ = transpose(reshape(dfdθ, np, ny))
 
                 # check for stability
