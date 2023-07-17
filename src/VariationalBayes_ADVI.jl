@@ -9,6 +9,8 @@ using ExponentialUtilities
 using ForwardDiff
 using Plots
 using Random
+using OrderedCollections
+using JLD2
 # Random.seed!(3);
 
 
@@ -61,20 +63,20 @@ dim = size(x, 1);
     csd_imag ~ MvNormal(imag(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
 end
 
-foo = Ref{Any}()
-backintime = Ref{Any}()
-
 # ADVI
 modelEMn = fitADVI_csd(y_csd)
-Turing.setadbackend(:forwarddiff)
+MCMCsamples = 100
+chains = sample(modelEMn, NUTS(), MCMCsamples)
+save_object("MCMC_NUTS_sa" * string(MCMCsamples) * ".jld2", chains)
 
-ADVIsteps = 1000
-ADVIsamples = 10
-advi = ADVI(ADVIsamples, ADVIsteps) 
-setchunksize(8)
-q = vi(modelEMn, advi);
-iter = 1
-serialize("ADVIdata" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * ".dat", (q, advi, model))
+# Turing.setadbackend(:forwarddiff)
+# ADVIsteps = 1000
+# ADVIsamples = 10
+# iter = 1
+# advi = ADVI(ADVIsamples, ADVIsteps) 
+# setchunksize(8)
+# q = vi(modelEMn, advi);
+# save_object("ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * ".jld2", (q, advi, model))
 
 # chain = sample(modelEMn, NUTS(), 1000);
 
