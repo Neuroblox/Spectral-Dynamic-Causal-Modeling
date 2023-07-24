@@ -133,9 +133,8 @@ function transferfunction_fmri(w, idx_A, derivatives, params)   # relates to: sp
 
     nd = Int(sqrt(length(idx_A)))
     C = params[(6+2nd+nd^2):(5+3nd+nd^2)]
-
     C /= 16.0   # TODO: unclear why C is devided by 16 but see spm_fx_fmri.m:49
-    ∂f = derivatives[:∂f](params[1:(nd^2+nd+1)]...)#convert(Array{Real}, substitute(derivatives[:∂f], params))
+    ∂f = derivatives[:∂f](params[1:(nd^2+nd+1)])  # convert(Array{Real}, substitute(derivatives[:∂f], params))
 
     dfdu = zeros(eltype(C), size(∂f, 1), length(C))
     dfdu[CartesianIndex.([(idx[2][1], idx[1]) for idx in enumerate(idx_A[[(i-1)*nd+i for i=1:nd]])])] = C
@@ -369,7 +368,6 @@ end
     nd = size(θμ, 1)
 
     # define function that implements spectra given in equation (2) of "A DCM for resting state fMRI".
-    # Main.foo[] = α, β, γ
     # neuronal fluctuations (Gu) (1/f or AR(1) form)
     G = w.^(-exp(α[2]))   # spectrum of hidden dynamics
     G /= sum(G)
@@ -566,9 +564,9 @@ MTK Version
     local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
     for k = 1:niter
         state.iter = k
+        # TODO: continue testing matrix free jacobians
         # J_test = JacVec(f_prep, μθ_po)
         # dfdp = stack(J_test*v for v in eachcol(V))
-        # Main.foo[] = f_prep, μθ_po, V
         dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
@@ -752,7 +750,6 @@ end
         state.iter = k
         # J_test = JacVec(f_prep, μθ_po)
         # dfdp = stack(J_test*v for v in eachcol(V))
-        # Main.foo[] = f_prep, μθ_po, V
         dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
         norm_dfdp = matlab_norm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);

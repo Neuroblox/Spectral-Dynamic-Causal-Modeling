@@ -5,6 +5,22 @@ using ModelingToolkit
 D = Differential(t)
 
 """
+Issue with parameters at level0, see parameterscoping.
+"""
+function scope_dict(para_dict::Dict{Symbol, Union{Real,Num}})
+    para_dict_copy = copy(para_dict)
+    for (n,v) in para_dict_copy
+        if typeof(v) == Num
+            para_dict_copy[n] = ParentScope(v)
+        else
+            para_dict_copy[n] = (@parameters $n=v)[1]
+        end
+    end
+    return para_dict_copy
+end
+
+
+"""
 Hemodynamic Response Function modeled by the sum of two gamma functions
 A[1] and A[2] model the magnitudes of the peak and undershoot terms, respectively.
 τ[1] and τ[2] model the width, peak height, and time-to-peak.
@@ -34,7 +50,9 @@ function hemodynamicsMTK(;name, κ=0.0, τ=0.0)
     =#
     H = [0.64, 0.32, 2.00, 0.32, 0.4]
 
-    params = @parameters κ=κ τ=τ
+    params = scope_dict(Dict(:κ=>κ, :τ=>τ))
+    κ = params[:κ]
+    τ = params[:τ]
     states = @variables s(t) lnf(t) lnν(t) lnq(t) x(t)
 
     eqs = [
@@ -44,7 +62,7 @@ function hemodynamicsMTK(;name, κ=0.0, τ=0.0)
         D(lnq) ~ (exp(lnf)/exp(lnq)*((1 - (1 - H[5])^(exp(lnf)^-1))/H[5]) - exp(lnν)^(H[4]^-1 - 1))/(H[3]*exp(τ))
     ]
 
-    return ODESystem(eqs, t, states, params; name=name)
+    return ODESystem(eqs, t, states, values(params); name=name)
 end
 
 
@@ -71,7 +89,7 @@ function boldsignal(;name, lnϵ=0.0)
         bold ~ V0*(k1 - k1*exp(q) + exp(lnϵ)*r0*E0*TE - exp(lnϵ)*r0*E0*TE*exp(q)/exp(ν) + 1-exp(lnϵ) - (1-exp(lnϵ))*exp(ν))
     ]
 
-    ODESystem(eqs, t, vars, params; name=name)
+    ODESystem(eqs, t, vars, values(params); name=name)
 end
 
 function linearneuralmass(;name)
@@ -86,7 +104,7 @@ function linearconnectionssymbolic(;name, sys=sys, adj_matrix=adj_matrix, connec
     for i in 1:nr
        push!(eqs, sys[i].nmm.jcn ~ sum(adj_matrix[(1+(i-1)*nr):nr*i] .* connector))
     end
-    return ODESystem(eqs, name=name, systems=sys)
+    return ODESystem(eqs, systems=sys; name=name)
 end
 
 

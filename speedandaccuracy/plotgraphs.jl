@@ -48,6 +48,72 @@ using LinearAlgebra
 r = 3
 vals = matread("speedandaccuracy/matlab0.01_" * string(r) * "regions.mat");
 A_true = vals["true_params"]["A"]
+d = size(A_true, 1)
+
+tp = Dict(
+    :A => vals["true_params"]["A"],
+    :lntransit => vals["true_params"]["transit"],
+    :lndecay => 0.0,
+    :lnϵ => 0.0,
+    :α => zeros(2),
+    :β => zeros(2),
+    :γ => zeros(3)
+)
+
+vlp = Dict(
+    :A => vals["Ep"]["A"],
+    :lntransit => vals["Ep"]["transit"],
+    :lndecay => vals["Ep"]["decay"][1],
+    :lnϵ => vals["Ep"]["epsilon"][1],
+    :α => vals["Ep"]["a"][1:2],
+    :β => vals["Ep"]["b"][1:2],
+    :γ => vals["Ep"]["c"][1:3]
+)
+
+advip = Dict(
+    :A => [],
+    :lntransit => [],
+    :lndecay => [],
+    :lnϵ => [],
+    :α => [],
+    :β => [],
+    :γ => []
+)
+
+
+ADVIsteps = 1000
+ADVIsamples = 10
+
+for iter = 1:15
+    q = load_object("speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".jld2")[1];
+    push!(advip[:A], reshape(q.dist.m[1:d^2], d, d))
+    push!(advip[:lntransit], q.dist.m[(d^2+d+1):(d^2+2d)])
+    push!(advip[:lndecay], q.dist.m[(d^2+2d+1)])
+    push!(advip[:lnϵ], q.dist.m[d^2+2d+2])
+    push!(advip[:α], q.dist.m[(d^2+2d+3):(d^2+2d+4)])
+    push!(advip[:β], q.dist.m[(d^2+2d+5):(d^2+2d+6)])
+    push!(advip[:γ], q.dist.m[(d^2+2d+7):(d^2+3d+6)])
+end
+
+
+push!(advip[:A], mean(advip[:A]))
+push!(advip[:lntransit], mean(advip[:lntransit]))
+push!(advip[:lndecay], mean(advip[:lndecay]))
+push!(advip[:lnϵ], mean(advip[:lnϵ]))
+push!(advip[:α], mean(advip[:α]))
+push!(advip[:β], mean(advip[:β]))
+push!(advip[:γ], mean(advip[:γ]))
+
+abs.((advip[:A][end] - tp[:A]))
+abs.(vlp[:A] - tp[:A])
+abs.(advip[:lntransit][end] - tp[:lntransit])
+abs.(vlp[:lntransit] - tp[:lntransit])
+
+abs.(advip[:lndecay][end] - tp[:lndecay])
+abs.(vlp[:lndecay] - tp[:lndecay])
+
+
+A_true = vals["true_params"]["A"]
 A_std = reshape(sqrt.(diag(vals["Cp"][1:9,1:9])),3,3)
 d = size(A_true, 1)
 ADVIsteps = 1000

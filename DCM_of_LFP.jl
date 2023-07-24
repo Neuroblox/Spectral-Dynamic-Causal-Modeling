@@ -1,7 +1,7 @@
 # apply spectral DCM to LFP data
 
 using LinearAlgebra
-# using MKL
+using MKL
 using FFTW
 using ToeplitzMatrices
 using MAT
@@ -21,7 +21,7 @@ include("src/mar.jl")                         # multivariate auto-regressive mod
 
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("speedandaccuracy/matlab0.01_3regions.mat");
+vars = matread("speedandaccuracy/matlab0.01_5regions.mat");
 y = vars["data"];
 nd = size(y, 2);
 dt = vars["dt"];
@@ -58,52 +58,36 @@ diagelem = [(i-1)*nd+i for i in 1:nd]
 @parameters A[1:length(Adj)] = vec(Adj)
 
 @named model = linearconnectionssymbolic(sys=regions, adj_matrix=[i in diagelem ? -exp(a)/2 : a for (i, a) in enumerate(A)], connector=connex)
-f = structural_simplify(model)
-jac_f = calculate_jacobian(f)
-jac_f = substitute(jac_f, Dict([p for p in parameters(f) if occursin("κ", string(p))] .=> κ))
+nrnmodel = structural_simplify(model)
+all_s = states(nrnmodel)
 
-measurements = []
-@named bold = boldsignal()
-grad_g = calculate_jacobian(bold)[2:3]
-
-# define values of states
-all_s = states(f)
-# all_s = [s[3] for s in split.(string.(states(f)), "₊")]
-# idx = Array{Int64}[]
-# for s in unique(all_s)
-#     push!(idx, findall(all_s .== s))
-# end
-# idx = vcat(idx...)
-# all_s = states(f)[idx]
-# jac_f = jac_f[idx, idx]
-
-sts = Dict{typeof(all_s[1]), eltype(x)}()
+sts = OrderedDict{typeof(all_s[1]), eltype(x)}()
 for i in 1:nd
     for (j, s) in enumerate(all_s[occursin.("r$i", string.(all_s))])
         sts[s] = x[i, j]
     end
 end
 
-bolds = states(bold)
-statesubs = merge.([Dict(bolds[2] => s) for s in all_s if occursin(string(bolds[2]), string(s))],
-                   [Dict(bolds[3] => s) for s in all_s if occursin(string(bolds[3]), string(s))])
+@named bold = boldsignal()
 
-grad_g_full = Num.(zeros(nd, length(all_s)))
-for (i, s) in enumerate(all_s)
-    dim = parse(Int64, string(s)[2])
-    if occursin.(string(bolds[2]), string(s))
-        grad_g_full[dim, i] = substitute(grad_g[1], statesubs[dim])
-    elseif occursin.(string(bolds[3]), string(s))
-        grad_g_full[dim, i] = substitute(grad_g[2], statesubs[dim])
+grad_full = function(p, grad, sts, nd)
+    tmp = zeros(typeof(p), nd, length(sts))
+    for i in 1:nd
+        # need to resort states and then also the gradient, because in bold the variables are sorted differently from nrnmodel
+        # tmp[i, (i-1)*5 .+ (4:5)] = grad(sts[vcat([1], (i-1)*5 .+ (4:5))], p, t)[2:3]
+        tmp[i, (i-1)*5 .+ (4:5)] = grad(sts[vcat([1], (i-1)*5 .+ (5:-1:4))], p, t)[3:-1:2]
     end
+    return tmp
 end
+jac_f = generate_jacobian(nrnmodel, expression = Val{false})[1]
+grad_g = generate_jacobian(bold, expression = Val{false})[1]
 
+statevals = [v for v in values(sts)]
+derivatives = Dict(:∂f => par -> jac_f(statevals, par, t),
+                   :∂g => par -> grad_full(par, grad_g, statevals, nd))
 
 modelparam = OrderedDict{Any, Any}()
-for par in parameters(f)
-    while Symbolics.getdefaultval(par) isa Num
-        par = Symbolics.getdefaultval(par)
-    end
+for par in parameters(nrnmodel)
     modelparam[par] = Symbolics.getdefaultval(par)
 end
 # Noise parameter mean
@@ -115,12 +99,6 @@ modelparam[:C] = ones(Float64, nd);     # C as in equation 3. NB: whatever C is 
 for par in parameters(bold)
     modelparam[par] = Symbolics.getdefaultval(par)
 end
-
-idx_A = findall(occursin.("A[", string.(jac_f)))
-pnames = [k for k in keys(modelparam)]
-derivatives = Dict(:∂f => eval(Symbolics.build_function(substitute(jac_f, sts), pnames[1:nd^2+nd+1]...)[1]),
-                   :∂g => eval(Symbolics.build_function(substitute(grad_g_full, sts), pnames[end])[1]))
-# derivatives = Dict(:∂f => substitute(jac_f, sts), :∂g => substitute(grad_g_full, sts))
 
 # define prior variances
 paramvariance = copy(modelparam)
@@ -164,5 +142,10 @@ priors = Dict(:μ => modelparam,
                         )
              );
 
+# TODO: it would be much nicer getting the positions of the A's without this hacky solution.
+# Perhaps even circumvent the need to find the position, see transferfunction_fmri.
+jac = calculate_jacobian(nrnmodel)
+idx_A = findall(occursin.("A[", string.(jac)))
+
 ### Compute the DCM ###
-@time results = variationalbayes(idx_A, y_csd, derivatives, freqs, V, p, priors, 128)
+@time results = variationalbayes(idx_A, y_csd, derivatives, freqs, V, p, priors, 1)
