@@ -115,12 +115,15 @@ function wrapperfunction_MTK(vars, iter)
     all_s = states(nrnmodel)
     
     sts = OrderedDict{typeof(all_s[1]), eltype(x)}()
-    for i in 1:nd
-        for (j, s) in enumerate(all_s[occursin.("r$i", string.(all_s))])
+    rnames = []
+    map(x->push!(rnames, split(string(x), "₊")[1]), all_s); 
+    rnames = unique(rnames);
+    for (i, r) in enumerate(rnames)
+        for (j, s) in enumerate(all_s[r .== map(x -> x[1], split.(string.(all_s), "₊"))])   # TODO: fix this solution, it is not robust!!
             sts[s] = x[i, j]
         end
     end
-    
+        
     @named bold = boldsignal()
     
     grad_full = function(p, grad, sts, nd)
@@ -205,7 +208,7 @@ function wrapperfunction_MTK(vars, iter)
 end
 
 # speed comparison between different DCM implementations
-for n in 5:6
+for n in 9:10
     vals = matread("speedandaccuracy/matlab0.01_" * string(n) *"regions.mat");
     include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
     wrapperfunction(vals, 1)

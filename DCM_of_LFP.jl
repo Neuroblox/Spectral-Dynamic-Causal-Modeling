@@ -15,13 +15,13 @@ function Base.vec(x::T) where (T <: Real)
 end
 
 include("src/hemodynamic_response.jl")        # hemodynamic and BOLD signal model
-include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_AD.jl")         # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                         # multivariate auto-regressive model functions
 
 
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("speedandaccuracy/matlab0.01_5regions.mat");
+vars = matread("speedandaccuracy/matlab0.01_10regions.mat");
 y = vars["data"];
 nd = size(y, 2);
 dt = vars["dt"];
@@ -62,8 +62,11 @@ nrnmodel = structural_simplify(model)
 all_s = states(nrnmodel)
 
 sts = OrderedDict{typeof(all_s[1]), eltype(x)}()
-for i in 1:nd
-    for (j, s) in enumerate(all_s[occursin.("r$i", string.(all_s))])
+rnames = []
+map(x->push!(rnames, split(string(x), "₊")[1]), all_s); 
+rnames = unique(rnames);
+for (i, r) in enumerate(rnames)
+    for (j, s) in enumerate(all_s[r .== map(x -> x[1], split.(string.(all_s), "₊"))])   # TODO: fix this solution, it is not robust!!
         sts[s] = x[i, j]
     end
 end
@@ -148,4 +151,4 @@ jac = calculate_jacobian(nrnmodel)
 idx_A = findall(occursin.("A[", string.(jac)))
 
 ### Compute the DCM ###
-@time results = variationalbayes(idx_A, y_csd, derivatives, freqs, V, p, priors, 1)
+@time results = variationalbayes(idx_A, y_csd, derivatives, freqs, V, p, priors, 128)
