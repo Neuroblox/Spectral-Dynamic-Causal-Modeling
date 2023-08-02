@@ -12,7 +12,7 @@ using Distributions
 using Flux
 
 ### a few packages relevant for speed tests and profiling ###
-using Serialization
+using JLD2
 
 
 # simple dispatch for vec to deal with 1xN matrices
@@ -76,7 +76,7 @@ function wrapperfunction_ADVI(vars, samples, steps)
     Turing.setadbackend(:forwarddiff)
     advi = ADVI(samples, steps)
     setchunksize(8)
-    q = vi(modelEMn, advi, optimizer=Turing.Variational.DecayedADAGrad(1e-2));
+    q = vi(modelEMn, advi);
     return (q, advi, modelEMn)
 end
 
@@ -85,22 +85,22 @@ ADVIsteps = 1000
 ADVIsamples = 10
 local vals
 n = 2
-for iter = 15
-    vals = matread("speedandaccuracy/matlab0.01_" * string(n) * "regions.mat");
+for iter = 1:2
+    vals = matread("speedandaccuracy/matlab_" * string(n) * "regions.mat");
     t_juliaADVI = @elapsed (q, advi, model) = wrapperfunction_ADVI(vals, ADVIsamples, ADVIsteps)
-    serialize("ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(n) * ".dat", (q, advi, model, t_juliaADVI))
+    save_object("newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(n) * ".jld2", (q, advi, model, t_juliaADVI))
 end
 
 # Note for 3 regions
 # if I use the native version I improve drastically in parameters and free energy over correct Q and random inits
 # if I introduce random initial conditions I get worse parameters and the free energy doubles
 # with Q and random inits the accuracy decreases and the free energy halves as compared to the first version
-vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab_3regions.mat");
-q = deserialize("ADVI_3regions.dat")[1]
-z = rand(q, 1000);
-avg = vec(mean(z; dims = 2))
-A_true = vals["true_params"]["A"]
-# A_true = [0 0.0254; 0.0084 0]
-d = size(A_true, 1)
-rms = abs.(reshape(avg[1:d^2], d, d) - A_true)
-rms_Laplace = abs.(vals["Ep"]["A"] - A_true)
+# vals = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/matlab_3regions.mat");
+# q = deserialize("ADVI_3regions.dat")[1]
+# z = rand(q, 1000);
+# avg = vec(mean(z; dims = 2))
+# A_true = vals["true_params"]["A"]
+# # A_true = [0 0.0254; 0.0084 0]
+# d = size(A_true, 1)
+# rms = abs.(reshape(avg[1:d^2], d, d) - A_true)
+# rms_Laplace = abs.(vals["Ep"]["A"] - A_true)
