@@ -22,7 +22,7 @@ function Base.vec(x::T) where (T <: Real)
     return x*ones(1)
 end
 
-vars = matread("/home/david/Projects/neuroblox/codes/Spectral-DCM/speedandaccuracy/nregions3.mat");
+vars = matread("speedandaccuracy/nregions2.mat");
 y = vars["data"];
 dt = vars["dt"];
 w = vec(vars["Hz"]);
@@ -65,17 +65,17 @@ end
 
 # ADVI
 modelEMn = fitADVI_csd(y_csd)
-MCMCsamples = 100
-chains = sample(modelEMn, NUTS(), MCMCsamples)
-save_object("MCMC_NUTS_sa" * string(MCMCsamples) * ".jld2", chains)
+# MCMCsamples = 100
+# chains = sample(modelEMn, NUTS(), MCMCsamples)
+# save_object("MCMC_NUTS_sa" * string(MCMCsamples) * ".jld2", chains)
 
-# Turing.setadbackend(:forwarddiff)
-# ADVIsteps = 1000
-# ADVIsamples = 10
-# iter = 1
-# advi = ADVI(ADVIsamples, ADVIsteps) 
-# setchunksize(8)
-# q = vi(modelEMn, advi);
+Turing.setadbackend(:forwarddiff)
+ADVIsteps = 1000
+ADVIsamples = 10
+iter = 1
+advi = ADVI(ADVIsamples, ADVIsteps) 
+setchunksize(8)
+q = vi(modelEMn, advi);
 # save_object("ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * ".jld2", (q, advi, model))
 
 # chain = sample(modelEMn, NUTS(), 1000);

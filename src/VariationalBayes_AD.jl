@@ -295,7 +295,7 @@ function mar2csd(mar, freqs)
     p = mar["p"]
     A = mar["A"]
     nd = size(Σ, 1)
-    w  = 2pi*freqs/sf    # isn't it already transformed?? Is the original really in Hz? Also clearly freqs[end] is not the sampling frequency of the signal...
+    w  = 2pi*freqs/sf    # TODO: isn't it already transformed?? Is the original really in Hz? Also clearly freqs[end] is not the sampling frequency of the signal...
     nf = length(w)
 	csd = zeros(eltype(Σ), nf, nd, nd)
 	for i = 1:nf
