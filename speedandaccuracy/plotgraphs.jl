@@ -1,49 +1,56 @@
 using Plots
 using MAT
 using Serialization
-using LaTeXStrings
 
 t_mat = Vector{Float64}()
 t_julad = Vector{Float64}()
 t_julspm = Vector{Float64}()
+t_julmtk = Vector{Float64}()
 iter_spm = Vector{Float64}()
 iter_ad = Vector{Float64}()
+iter_mtk = Vector{Float64}()
 F_spm = Vector{Float64}()
 F_mat = Vector{Float64}()
 F_ad =  Vector{Float64}()
+F_mtk =  Vector{Float64}()
 list = collect(2:10)
 # append!(list,10)
 for i = list
-    tmp = matread("speedandaccuracy/PMn" * string(i) * ".mat");
+    tmp = matread("speedandaccuracy/PM_MTK" * string(i) * ".mat");
     # append!(t_mat, tmp["t_mat"]/tmp["iter_spm"])
     # append!(t_julad, tmp["t_jad"]/tmp["iter_ad"])
     # append!(t_julspm, tmp["t_jspm"]/tmp["iter_spm"])
     append!(t_mat, tmp["t_mat"])
     append!(t_julad, tmp["t_jad"])
     append!(t_julspm, tmp["t_jspm"])
+    append!(t_julmtk, tmp["t_mtk"])
     append!(iter_ad, tmp["iter_ad"])
     append!(iter_spm, tmp["iter_spm"])
+    append!(iter_mtk, tmp["iter_mtk"])
     append!(F_mat, tmp["F_mat"])
     append!(F_spm, tmp["F_jspm"])
     append!(F_ad, tmp["F_jad"])
+    append!(F_mtk, tmp["F_mtk"])
 end
 # plot(list, (t_mat./t_julad.-1), legendfontsize=12, xtickfontsize=14, xguidefontsize=14, ytickfontsize=14, yguidefontsize=14, legend=:topleft, xlabel="number of regions",ylabel="speed increase", linewidth=3, label="Julia AD")
 # plot!(list, (t_mat./t_julspm.-1), linewidth=3, label="Julia SPM12")
 # scatter!(list, (t_mat./t_julad.-1), markersize=6, color="blue", label=nothing)
 # scatter!(list, (t_mat./t_julspm.-1), markersize=6, color="red", label=nothing)
-plot(list, t_julad./60, legendfontsize=12, xtickfontsize=14, xguidefontsize=14, ytickfontsize=14, yguidefontsize=14, legend=:topleft, xlabel="number of regions",ylabel="computation time [min]", linewidth=3, label="Julia AD")
-plot!(list, t_julspm./60, linewidth=3, label="Julia SPM12")
+plot(list, t_julspm./60, legendfontsize=12, xtickfontsize=14, xguidefontsize=14, ytickfontsize=14, yguidefontsize=14, legend=:topleft, xlabel="number of regions",ylabel="computation time [min]", linewidth=3, label="Julia SPM12")
+plot!(list, t_julad./60, linewidth=3, label="Julia AD")
+plot!(list, t_julmtk./60, linewidth=3, label="Julia MTK + AD")
 plot!(list, t_mat./60, linewidth=3, color="black", label="Matlab SPM12")
 scatter!(list, t_julad, markersize=6, color="blue", label=nothing)
 scatter!(list, t_julspm, markersize=6, color="red", label=nothing)
 title!("speed comparison between Julia and Matlab")
-savefig("speedandaccuracy/plots/speedcomp10regions.png")
+savefig("speedandaccuracy/plots/speedcomp10regions_MTK.png")
 
 
 ### plot ADVI results ###
 using JLD2
 using StatsPlots
 using LinearAlgebra
+using LaTeXStrings
 
 r = 3
 vals = matread("speedandaccuracy/matlab0.01_" * string(r) * "regions.mat");
@@ -132,11 +139,20 @@ for iter in 1:15
     savefig("speedandaccuracy/plots/F_ADVI_hist" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
 end
 
+
+nuts = load_object("speedandaccuracy/NUTS/MCMC_NUTS_sa100.jld2")
+nuts.value[end,:,1]
+ss = describe(nuts)[1]
+nutsm = reshape(ss.nt.mean[1:9],3,3)
+nutss = reshape(ss.nt.std[1:9],3,3)
+
 X = []
 Yj = []
 Yj_total = []
 Ym = []
 Ym_err = []
+Yn = []
+Yn_err = []
 Yt = []
 for i = 1:d
     for j = 1:d
@@ -145,6 +161,8 @@ for i = 1:d
         end
         push!(X, latexstring("a_{", string(i), string(j), "}"))
         push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
+        push!(Yn, nutsm[i, j])
+        push!(Yn_err, nutss[i, j])
         push!(Ym, vals["Ep"]["A"][i, j])
         push!(Ym_err, A_std[i, j])
         push!(Yt, A_true[i, j])
@@ -177,8 +195,11 @@ default(size=(800,600),
 
 boxplot(repeat(X,outer=5), vcat(Yj_total...), label="ADVI")
 scatter!(X, (Ym .- Yt)./abs.(Yt), yerr=Ym_err./abs.(Yt), label="Laplace", legend=:best)
+scatter!(X, (Yn .- Yt)./abs.(Yt), yerr=Yn_err./abs.(Yt), label="NUTS")
+scatter!(X, (Yn .- Yt)./abs.(Yt), label="NUTS")
 hline!([0], linestyle=:dash, color=:black, label=false)
-savefig("speedandaccuracy/plots/ADVIboxplot_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
+
+savefig("speedandaccuracy/plots/ADVIboxplot_NUTSstd_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
 
 scatter!(X, Ym  .- Yt, label="Laplace", color=:blue)
 scatter!(repeat(X,outer=5),Yj_total, label=false, markeralpha=0.3, color=:orange)
@@ -187,3 +208,7 @@ title!("standard deviation of interaction = 0.01\n ADVI samples = " * string(ADV
 violin(repeat(X,outer=5), vcat(Yj_total...), linewidth=0)
 scatter!(X, Ym  .- Yt, label="Laplace", color=:blue)
 boxplot!(repeat(X,outer=5), vcat(Yj_total...), fillalpha=0.75, linewidth=2)
+
+
+using JLD2
+
