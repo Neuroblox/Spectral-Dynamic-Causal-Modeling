@@ -51,11 +51,12 @@ using JLD2
 using StatsPlots
 using LinearAlgebra
 using LaTeXStrings
+using MAT
 
-r = 3
-vals = matread("speedandaccuracy/matlab0.01_" * string(r) * "regions.mat");
+r = 2
+vals = matread("speedandaccuracy/matlab_" * string(r) * "regions.mat");
 A_true = vals["true_params"]["A"]
-d = size(A_true, 1)
+nd = size(A_true, 1)
 
 tp = Dict(
     :A => vals["true_params"]["A"],
@@ -64,42 +65,46 @@ tp = Dict(
     :lnϵ => 0.0,
     :α => zeros(2),
     :β => zeros(2),
-    :γ => zeros(3)
+    :γ => zeros(3),
+    :csd => vals["csd"]
 )
 
-vlp = Dict(
+vlp = Dict(  # variational Bayes results
     :A => vals["Ep"]["A"],
     :lntransit => vals["Ep"]["transit"],
     :lndecay => vals["Ep"]["decay"][1],
     :lnϵ => vals["Ep"]["epsilon"][1],
     :α => vals["Ep"]["a"][1:2],
     :β => vals["Ep"]["b"][1:2],
-    :γ => vals["Ep"]["c"][1:3]
+    :γ => vals["Ep"]["c"][1:nd],
+    :csd => vals[]
 )
 
-advip = Dict(
+advip = Dict( # ADVI results
     :A => [],
     :lntransit => [],
     :lndecay => [],
     :lnϵ => [],
     :α => [],
     :β => [],
-    :γ => []
+    :γ => [],
+    :csd => []
 )
 
 
 ADVIsteps = 1000
 ADVIsamples = 10
 
-for iter = 1:15
-    q = load_object("speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".jld2")[1];
-    push!(advip[:A], reshape(q.dist.m[1:d^2], d, d))
-    push!(advip[:lntransit], q.dist.m[(d^2+d+1):(d^2+2d)])
-    push!(advip[:lndecay], q.dist.m[(d^2+2d+1)])
-    push!(advip[:lnϵ], q.dist.m[d^2+2d+2])
-    push!(advip[:α], q.dist.m[(d^2+2d+3):(d^2+2d+4)])
-    push!(advip[:β], q.dist.m[(d^2+2d+5):(d^2+2d+6)])
-    push!(advip[:γ], q.dist.m[(d^2+2d+7):(d^2+3d+6)])
+for iter = 1:4
+    q = load_object("speedandaccuracy/newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(r) * ".jld2")[1];
+    push!(advip[:A], reshape(q.dist.m[q.transform.ranges[1]], d, d))
+    push!(advip[:lntransit], q.dist.m[q.transform.ranges[2]])
+    push!(advip[:lndecay], q.dist.m[q.transform.ranges[3]])
+    push!(advip[:lnϵ], q.dist.m[q.transform.ranges[4]])
+    push!(advip[:α], q.dist.m[q.transform.ranges[5]])
+    push!(advip[:β], q.dist.m[q.transform.ranges[6]])
+    push!(advip[:γ], q.dist.m[q.transform.ranges[7]])
+    push!(advip[:csd], q.dist.m[q.transform.ranges[8]] + im*q.dist.m[q.transform.ranges[9]])
 end
 
 
@@ -121,12 +126,12 @@ abs.(vlp[:lndecay] - tp[:lndecay])
 
 
 A_true = vals["true_params"]["A"]
-A_std = reshape(sqrt.(diag(vals["Cp"][1:9,1:9])),3,3)
 d = size(A_true, 1)
+A_std = reshape(sqrt.(diag(vals["Cp"][1:d^2,1:d^2])), d, d)
 ADVIsteps = 1000
 ADVIsamples = 10
 iter = 1
-(q, advi, cond_model) = load_object("speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".jld2");
+(q, advi, cond_model) = load_object("speedandaccuracy/newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(r) * ".jld2");
 # (q, advi, cond_model) = deserialize("speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat");
 Turing.elbo(advi, q, cond_model, 10)
 Fs = zeros(100)
@@ -140,11 +145,12 @@ for iter in 1:15
 end
 
 
-nuts = load_object("speedandaccuracy/NUTS/MCMC_NUTS_sa100.jld2")
-nuts.value[end,:,1]
+nuts = load_object("speedandaccuracy/NUTS/MCMC_NUTS_sa1000.jld2")
+nuts = load_object("speedandaccuracy/NUTS/MCMC_NUTS_std10_sa1000.jld2")
+nuts.value[end, :, 1]
 ss = describe(nuts)[1]
-nutsm = reshape(ss.nt.mean[1:9],3,3)
-nutss = reshape(ss.nt.std[1:9],3,3)
+nutsm = reshape(ss.nt.mean[1:d^2], d, d)
+nutss = reshape(ss.nt.std[1:d^2], d, d)
 
 X = []
 Yj = []
@@ -168,10 +174,11 @@ for i = 1:d
         push!(Yt, A_true[i, j])
     end
 end
-push!(Yj_total, (Yj .- Yt)./abs.(Yt))
+# push!(Yj_total, (Yj .- Yt)./abs.(Yt))
+push!(Yj_total, Yj)
 # scatter(X, Yj, label="ADVI",color=:orange, legendfontsize=10, xtickfontsize=12, xguidefontsize=12, ytickfontsize=12, yguidefontsize=12, markeralpha=0.3)
-for iter = 2:15
-    q = load_object("speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".jld2")[1];
+for iter = 2:4
+    q = load_object("speedandaccuracy/newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(r) * ".jld2")[1];
     Yj = []
     for i = 1:d
         for j = 1:d
@@ -182,8 +189,10 @@ for iter = 2:15
         end
     end
     # scatter!(X, Yj, label=false, color=:orange, markeralpha=0.3)
-    push!(Yj_total, (Yj .- Yt)./abs.(Yt))
+    # push!(Yj_total, (Yj .- Yt)./abs.(Yt))
+    push!(Yj_total, Yj)
 end
+
 default(size=(800,600),
         legendfontsize=14,
         xtickfontsize=22,
@@ -191,16 +200,20 @@ default(size=(800,600),
         ytickfontsize=16,
         yguidefontsize=16,
         markersize=8,
-        ylabel="relative distance from ground truth")
+        # ylabel="relative distance from ground truth")
+        ylabel="connection strength")
 
 boxplot(repeat(X,outer=5), vcat(Yj_total...), label="ADVI")
-scatter!(X, (Ym .- Yt)./abs.(Yt), yerr=Ym_err./abs.(Yt), label="Laplace", legend=:best)
-scatter!(X, (Yn .- Yt)./abs.(Yt), yerr=Yn_err./abs.(Yt), label="NUTS")
-scatter!(X, (Yn .- Yt)./abs.(Yt), label="NUTS")
+# scatter!(X, (Ym .- Yt)./abs.(Yt), yerr=Ym_err./abs.(Yt), label="Laplace", legend=:best)
+scatter!(X, Ym, yerr=Ym_err, label="Laplace", legend=:best)
+# scatter!(X, (Yn .- Yt)./abs.(Yt), yerr=Yn_err./abs.(Yt), label="NUTS")
+scatter!(X, Yn, yerr=Yn_err, label="NUTS")
+scatter!(X, Yt, label="True", markershape=:diamond)
 hline!([0], linestyle=:dash, color=:black, label=false)
 
-savefig("speedandaccuracy/plots/ADVIboxplot_NUTSstd_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
+savefig("speedandaccuracy/plots/newADVIboxplot_NUTSstd_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".png")
 
+savefig("speedandaccuracy/plots/boxplot_NUTS1000_std1_r" * string(r) * ".png")
 scatter!(X, Ym  .- Yt, label="Laplace", color=:blue)
 scatter!(repeat(X,outer=5),Yj_total, label=false, markeralpha=0.3, color=:orange)
 scatter!(X, mean(Yj_total), yerr=std(Yj_total), label=L"$\mu$(ADVI)", color=:green, markerhsape=:diamond)

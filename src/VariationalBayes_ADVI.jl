@@ -33,7 +33,7 @@ x = vars["x"];           # initial condition of dynamic variabls
 dim = size(x, 1);
 Σ = vars["pC"]
 
-@model function fitADVI_csd(csd_data)
+@model function fitADVI_csd(csd_real, csd_imag)
     # set priors of variable parameters
     A ~ MvNormal(reshape(vars["pE"]["A"], dim^2), Σ[1:dim^2, 1:dim^2])
     C = zeros(dim);    # NB: whatever C is defined to be here, it will be replaced in csd_approx. A little strange thing of SPM12
@@ -56,15 +56,14 @@ dim = size(x, 1);
         csd = (p->p.value).(csd)
     end
 
-    csd_real = real(vec(csd_data))
-    csd_imag = imag(vec(csd_data))
-
     csd_real ~ MvNormal(real(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
     csd_imag ~ MvNormal(imag(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
 end
 
 # ADVI
-modelEMn = fitADVI_csd(y_csd)
+csd_real = real(vec(y_csd))
+csd_imag = imag(vec(y_csd))
+modelEMn = fitADVI_csd(csd_real, csd_imag)
 # MCMCsamples = 100
 # chains = sample(modelEMn, NUTS(), MCMCsamples)
 # save_object("MCMC_NUTS_sa" * string(MCMCsamples) * ".jld2", chains)

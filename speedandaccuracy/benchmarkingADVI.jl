@@ -84,11 +84,11 @@ end
 ADVIsteps = 1000
 ADVIsamples = 10
 local vals
-n = 2
-for iter = 1:2
+n = 3
+for iter = 9
     vals = matread("speedandaccuracy/matlab_" * string(n) * "regions.mat");
     t_juliaADVI = @elapsed (q, advi, model) = wrapperfunction_ADVI(vals, ADVIsamples, ADVIsteps)
-    save_object("newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(n) * ".jld2", (q, advi, model, t_juliaADVI))
+    save_object("speedandaccuracy/newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(n) * ".jld2", (q, advi, model, t_juliaADVI))
 end
 
 # Note for 3 regions
