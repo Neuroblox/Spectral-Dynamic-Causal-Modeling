@@ -20,7 +20,7 @@ include("src/hemodynamic_response.jl")        # hemodynamic and BOLD signal mode
 include("src/VariationalBayes_AD.jl")         # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/mar.jl")                         # multivariate auto-regressive model functions
 include("src/canonicalmicrocircuit.jl")
-
+include("src/lfp_leadfield.jl")
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
 vars = matread("speedandaccuracy/matlab_cmc.mat");
@@ -76,7 +76,6 @@ end
 @named cmc_network = ODEfromGraph(g)
 nrnmodel = structural_simplify(cmc_network)
 
-
 all_s = states(nrnmodel)
 
 sts = OrderedDict{typeof(all_s[1]), eltype(x)}()
@@ -89,20 +88,18 @@ for (i, r) in enumerate(rnames)
     end
 end
 
-# @named bold = boldsignal()
-
-grad_full = function(p, sts, nd)
-    tmp = zeros(typeof(p), nd, length(sts))
-    tmp[1,5] = 1
-    tmp[2,6] = 1
-    return tmp
-end
+@parameters L[1:nr] = ones(Float64, nr)
+@named lf = leadfield(L, all_s, nr, "sp₊x(t)")
 jac_f = generate_jacobian(nrnmodel, expression = Val{false})[1]
-# grad_g = generate_jacobian(bold, expression = Val{false})[1]
+grad_g = generate_jacobian(lf, expression = Val{false})[1]
+
+grad_g_corrected = function(grad, sts, p, nr)
+    return grad(sts, p, t)[:, (nr+1):end]
+end
 
 statevals = [v for v in values(sts)]
 derivatives = Dict(:∂f => par -> jac_f(statevals, par, t),
-                   :∂g => par -> grad_full(par, statevals, nd))
+                   :∂g => par -> grad_g_corrected(grad_g, statevals, par, nr))
 
 modelparam = OrderedDict{Any, Any}()
 for par in parameters(nrnmodel)
@@ -114,9 +111,9 @@ modelparam[:lnβ] = [0.0, 0.0];           # global observation noise, ln(β) as 
 modelparam[:lnγ] = zeros(Float64, nr);   # region specific observation noise
 modelparam[:C] = ones(Float64, nr);     # C as in equation 3. NB: whatever C is defined to be here, it will be replaced in csd_approx. Another strange thing of SPM12...
 
-# for par in parameters(bold)
-#     modelparam[par] = Symbolics.getdefaultval(par)
-# end
+for par in parameters(lf)
+    modelparam[par] = Symbolics.getdefaultval(par)
+end
 
 # define prior variances
 paramvariance = copy(modelparam)
