@@ -29,7 +29,7 @@ include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12
 include("src/mar.jl")                      # multivariate auto-regressive model functions
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("../Spectral-DCM/speedandaccuracy/Anthony/test2.mat");
+vars = matread("../Spectral-DCM/speedandaccuracy/matlab0.01_3regions.mat");
 y = vars["data"];
 nd = size(y, 2);
 dt = vars["dt"];
@@ -37,12 +37,12 @@ freqs = vec(vars["Hz"]);
 p = 8;                               # order of MAR, it is hard-coded in SPM12 with this value. We will just use the same for now.
 mar = mar_ml(y, p);                  # compute MAR from time series y and model order p
 y_csd = mar2csd(mar, freqs, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
-# y_csd = vars["csd"];
+y_csd = vars["csd"];
 ### Define priors and initial conditions ###
 x = vars["x"];                       # initial condition of dynamic variabls
-x .+= abs.(0.1randn(size(x)...))
+# x .+= abs.(0.1randn(size(x)...))
 θΣ = vars["pC"];                     # prior covariance of parameter values 
-θΣ[1:nd^2, 1:nd^2] = Matrix(I, nd^2, nd^2)
+# θΣ[1:nd^2, 1:nd^2] = Matrix(I, nd^2, nd^2)
 # depending on the definition of the priors (note that we take it from the SPM12 code), some dimensions are set to 0 and thus are not changed.
 # Extract these dimensions and remove them from the remaining computation. I find this a bit odd and further thoughts would be necessary to understand
 # to what extend this is legitimate. 
@@ -63,7 +63,7 @@ end
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 
 A = vars["pE"]["A"]
-A = (A + Matrix(I, size(A)...)) .* (1 .+ 0.1*randn(size(A)...))
+# A = (A + Matrix(I, size(A)...)) .* (1 .+ 0.1*randn(size(A)...))
 
 priors = Dict(:μ => OrderedDict{Any, Any}(
                                              :A => A,      # prior mean of connectivity matrix

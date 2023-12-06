@@ -36,7 +36,7 @@ end
 # plot!(list, (t_mat./t_julspm.-1), linewidth=3, label="Julia SPM12")
 # scatter!(list, (t_mat./t_julad.-1), markersize=6, color="blue", label=nothing)
 # scatter!(list, (t_mat./t_julspm.-1), markersize=6, color="red", label=nothing)
-plot(list, t_julspm./60, legendfontsize=12, xtickfontsize=14, xguidefontsize=14, ytickfontsize=14, yguidefontsize=14, legend=:topleft, xlabel="number of regions",ylabel="computation time [min]", linewidth=3, label="Julia SPM12")
+plot(list, t_julspm./60, legendfontsize=12, xtickfontsize=14, xguidefontsize=14, ytickfontsize=14, yguidefontsize=14, legend=:topleft, xlabel="Number of Regions",ylabel="Computation Time [min]", linewidth=3, label="Julia SPM12", framestyle=:box)
 plot!(list, t_julad./60, linewidth=3, label="Julia AD")
 plot!(list, t_julmtk./60, linewidth=3, label="Julia MTK + AD")
 plot!(list, t_mat./60, linewidth=3, color="black", label="Matlab SPM12")
@@ -53,7 +53,7 @@ using LinearAlgebra
 using LaTeXStrings
 using MAT
 
-r = 2
+r = 3
 vals = matread("speedandaccuracy/matlab_" * string(r) * "regions.mat");
 A_true = vals["true_params"]["A"]
 nd = size(A_true, 1)
@@ -131,7 +131,7 @@ A_std = reshape(sqrt.(diag(vals["Cp"][1:d^2,1:d^2])), d, d)
 ADVIsteps = 1000
 ADVIsamples = 10
 iter = 1
-(q, advi, cond_model) = load_object("speedandaccuracy/newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(r) * ".jld2");
+(q, advi, cond_model) = load_object("speedandaccuracy/fixedADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(r) * ".jld2");
 # (q, advi, cond_model) = deserialize("speedandaccuracy/ADVIADA" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_0.01_r" * string(r) * ".dat");
 Turing.elbo(advi, q, cond_model, 10)
 Fs = zeros(100)
@@ -167,8 +167,8 @@ for i = 1:d
         end
         push!(X, latexstring("a_{", string(i), string(j), "}"))
         push!(Yj, reshape(q.dist.m[1:d^2], d, d)[i,j])
-        push!(Yn, nutsm[i, j])
-        push!(Yn_err, nutss[i, j])
+        # push!(Yn, nutsm[i, j])
+        # push!(Yn_err, nutss[i, j])
         push!(Ym, vals["Ep"]["A"][i, j])
         push!(Ym_err, A_std[i, j])
         push!(Yt, A_true[i, j])
@@ -177,8 +177,8 @@ end
 # push!(Yj_total, (Yj .- Yt)./abs.(Yt))
 push!(Yj_total, Yj)
 # scatter(X, Yj, label="ADVI",color=:orange, legendfontsize=10, xtickfontsize=12, xguidefontsize=12, ytickfontsize=12, yguidefontsize=12, markeralpha=0.3)
-for iter = 2:4
-    q = load_object("speedandaccuracy/newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(r) * ".jld2")[1];
+for iter = 2:6
+    q = load_object("speedandaccuracy/fixedADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(r) * ".jld2")[1];
     Yj = []
     for i = 1:d
         for j = 1:d
