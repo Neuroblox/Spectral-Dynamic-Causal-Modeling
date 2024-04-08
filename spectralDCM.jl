@@ -8,6 +8,7 @@ using ForwardDiff
 using BenchmarkTools
 using OrderedCollections
 using SparseDiffTools
+Random.seed!(101);
 # Questions for Chris:
 # 1. what does it mean to cache *
 # 2. cached zeros just by moving them one loop out
@@ -39,7 +40,9 @@ y_csd = mar2csd(mar, freqs, dt^-1);  # compute cross spectral densities from MAR
 y_csd = vars["csd"];
 ### Define priors and initial conditions ###
 x = vars["x"];                       # initial condition of dynamic variabls
+# x .+= abs.(0.1randn(size(x)...))
 θΣ = vars["pC"];                     # prior covariance of parameter values 
+# θΣ[1:nd^2, 1:nd^2] = Matrix(I, nd^2, nd^2)
 # depending on the definition of the priors (note that we take it from the SPM12 code), some dimensions are set to 0 and thus are not changed.
 # Extract these dimensions and remove them from the remaining computation. I find this a bit odd and further thoughts would be necessary to understand
 # to what extend this is legitimate. 
@@ -59,8 +62,11 @@ end
 
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 
+A = vars["pE"]["A"]
+# A = (A + Matrix(I, size(A)...)) .* (1 .+ 0.1*randn(size(A)...))
+
 priors = Dict(:μ => OrderedDict{Any, Any}(
-                                             :A => vars["pE"]["A"],      # prior mean of connectivity matrix
+                                             :A => A,      # prior mean of connectivity matrix
                                              :C => ones(Float64, nd),    # C as in equation 3. NB: whatever C is defined to be here, it will be replaced in csd_approx. Another strange thing of SPM12...
                                              :lnτ => zeros(Float64, nd), # hemodynamic transit parameter
                                              :lnκ => 0.0,                # hemodynamic decay time
@@ -78,7 +84,7 @@ priors = Dict(:μ => OrderedDict{Any, Any}(
              );
 
 ### Compute the DCM ###
-@time results = variationalbayes(x, y_csd, freqs, V, p, priors, 126);
+@time results = variationalbayes(x, y_csd, freqs, V, p, priors, 128);
 
 # @benchmark bar1 = LinearAlgebra.eigen(J_tot)
 # function test(J)

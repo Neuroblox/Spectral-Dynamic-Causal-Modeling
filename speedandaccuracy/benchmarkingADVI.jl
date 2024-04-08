@@ -36,8 +36,7 @@ function wrapperfunction_ADVI(vars, samples, steps)
     dim = size(x, 1);
     Σ = vars["pC"]
 
-
-    @model function fitADVI_csd(csd_data)
+    @model function fitADVI_csd(csd_real, csd_imag)
         # set priors of variable parameters
         # Σ ~ InverseWishart(σ_μ, σ_σ)
         # define all priors of parameters
@@ -63,16 +62,14 @@ function wrapperfunction_ADVI(vars, samples, steps)
             csd = (p->p.value).(csd)
         end
 
-
-        csd_real = real(vec(csd_data))
-        csd_imag = imag(vec(csd_data))
         csd_real ~ MvNormal(real(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
         csd_imag ~ MvNormal(imag(vec(csd)), Matrix(1.0I, length(csd), length(csd)))
     end
 
-
     # ADVI
-    modelEMn = fitADVI_csd(y_csd)
+    csd_real = real(vec(y_csd))
+    csd_imag = imag(vec(y_csd))
+    modelEMn = fitADVI_csd(csd_real, csd_imag)
     Turing.setadbackend(:forwarddiff)
     advi = ADVI(samples, steps)
     setchunksize(8)
@@ -80,15 +77,14 @@ function wrapperfunction_ADVI(vars, samples, steps)
     return (q, advi, modelEMn)
 end
 
-# csdapproxvars = Ref{Any}()
 ADVIsteps = 1000
 ADVIsamples = 10
 local vals
-n = 2
-for iter = 1:2
+n = 3
+for iter = 9
     vals = matread("speedandaccuracy/matlab_" * string(n) * "regions.mat");
     t_juliaADVI = @elapsed (q, advi, model) = wrapperfunction_ADVI(vals, ADVIsamples, ADVIsteps)
-    save_object("newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(n) * ".jld2", (q, advi, model, t_juliaADVI))
+    save_object("speedandaccuracy/newADVI/ADVI" * string(iter) * "_sa" * string(ADVIsamples) * "_st" * string(ADVIsteps) * "_r" * string(n) * ".jld2", (q, advi, model, t_juliaADVI))
 end
 
 # Note for 3 regions

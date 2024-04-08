@@ -208,3 +208,128 @@ function mdl4mar(Σ, ns, d, p)
     return mdl
 end
 
+
+"""
+This function converts multivariate auto-regression (MAR) model parameters to a cross-spectral density (CSD).
+A     : coefficients of MAR model, array of length p, each element contains the regression coefficients for that particular time-lag.
+Σ     : noise covariance matrix of MAR
+p     : number of time lags
+freqs : frequencies at which to evaluate the CSD
+sf    : sampling frequency
+
+This function returns:
+csd   : cross-spectral density matrix of size MxN; M: number of samples, N: number of cross-spectral dimensions (number of variables squared)
+"""
+function mar2csd(mar, freqs, sf)
+    Σ = mar["Σ"]
+    p = mar["p"]
+    A = mar["A"]
+    nd = size(Σ, 1)
+    w  = 2*pi*freqs/sf
+    nf = length(w)
+	csd = zeros(ComplexF64, nf, nd, nd)
+	for i = 1:nf
+		af_tmp = I
+		for k = 1:p
+			af_tmp = af_tmp + A[k] * exp(-im * k * w[i])
+		end
+		iaf_tmp = inv(af_tmp)
+		csd[i,:,:] = iaf_tmp * Σ * iaf_tmp'
+	end
+    csd = 2*csd/sf
+    return csd
+end
+
+function mar2csd(mar, freqs)
+    sf = 2*freqs[end]   # freqs[end] is not the sampling frequency of the signal... not sure about this step.
+    Σ = mar["Σ"]
+    p = mar["p"]
+    A = mar["A"]
+    nd = size(Σ, 1)
+    w  = 2pi*freqs/sf
+    nf = length(w)
+	csd = zeros(eltype(Σ), nf, nd, nd)
+	for i = 1:nf
+		af_tmp = I
+		for k = 1:p
+			af_tmp = af_tmp + A[k] * exp(-im * k * w[i])
+		end
+		iaf_tmp = inv(af_tmp)
+		csd[i,:,:] = iaf_tmp * Σ * iaf_tmp'
+	end
+    csd = 2*csd/sf
+    return csd
+end
+
+
+"""
+Plain implementation of idft because AD dispatch versions for ifft don't work still!
+"""
+function idft(x::AbstractArray)
+    """discrete inverse fourier transform"""
+    N = size(x)[1]
+    out = Array{eltype(x)}(undef,N)
+    for n in 0:N-1
+        out[n+1] = 1/N*sum([x[k+1]*exp(2*im*π*k*n/N) for k in 0:N-1])
+    end
+    return out
+end
+
+"""
+This function converts a cross-spectral density (CSD) into a multivariate auto-regression (MAR) model. It first transforms the CSD into its
+cross-correlation function (Wiener-Kinchine theorem) and then computes the MAR model coefficients.
+csd       : cross-spectral density matrix of size MxN; M: number of samples, N: number of cross-spectral dimensions (number of variables squared)
+w         : frequencies
+dt        : time step size
+p         : number of time steps of auto-regressive model
+
+This function returns
+coeff     : array of length p of coefficient matrices of size sqrt(N)xsqrt(N)
+noise_cov : noise covariance matrix
+"""
+function csd2mar(csd, w, dt, p)
+    # TODO: investiagate why SymmetricToeplitz(ccf[1:p, i, j]) is not good to be used but instead need to use Toeplitz(ccf[1:p, i, j], ccf[1:p, j, i])
+    # as is done in the original MATLAB code (confront comment there). ccf should be a symmetric matrix so there should be no difference between the
+    # Toeplitz matrices but for the second jacobian (J[2], see for loop for i = 1:nJ in function diff) the computation produces subtle differences between
+    # the two versions.
+
+    dw = w[2] - w[1]
+    w = w/dw
+    ns = dt^-1
+    N = ceil(Int64, ns/2/dw)
+    gj = findall(x -> x > 0 && x < (N + 1), w)
+    gi = gj .+ (ceil(Int64, w[1]) - 1)    # TODO: figure out what's the purpose of this!
+    g = zeros(eltype(csd), N)
+
+    # transform to cross-correlation function
+    ccf = zeros(eltype(csd), N*2+1, size(csd,2), size(csd,3))
+    for i = 1:size(csd, 2)
+        for j = 1:size(csd, 3)
+            g[gi] = csd[gj,i,j]
+            f = idft(g)
+            f = idft(vcat([0.0im; g; conj(g[end:-1:1])]))
+            ccf[:,i,j] = real.(fftshift(f))*N*dw
+        end
+    end
+
+    # MAR coefficients
+    N = size(ccf,1)
+    m = size(ccf,2)
+    n = (N - 1) ÷ 2
+    p = min(p, n - 1)
+    ccf = ccf[(1:n) .+ n,:,:]
+    A = zeros(eltype(csd), m*p, m)
+    B = zeros(eltype(csd), m*p, m*p)
+    for i = 1:m
+        for j = 1:m
+            A[((i-1)*p+1):i*p, j] = ccf[(1:p) .+ 1, i, j]
+            B[((i-1)*p+1):i*p, ((j-1)*p+1):j*p] = Toeplitz(ccf[1:p, i, j], vcat(ccf[1,i,j], ccf[2:p, j, i]))  # SymmetricToeplitz(ccf[1:p, i, j])
+        end
+    end
+    a = B\A
+
+    Σ  = ccf[1,:,:] - A'*a   # noise covariance matrix
+    lags = [-a[i:p:m*p, :] for i = 1:p]
+    mar = Dict([("A", lags), ("Σ", Σ), ("p", p)])
+    return mar
+end
