@@ -322,6 +322,8 @@ end
 
 """
     csd_approx used for nonlinear functions like the CMC.
+    Here α is a matrix, SPM12 for some reason uses more fine grained parameter settings
+    when dealing with 
 """
 function csd_approx(f, x, w, θμ, C, α::Matrix, β, γ, lnϵ, lndecay, lntransit)
     # priors of spectral parameters

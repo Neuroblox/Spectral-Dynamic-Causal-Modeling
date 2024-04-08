@@ -72,7 +72,7 @@ for (i, r) in enumerate(rnames)
 end
 
 @named bold = boldsignal()
-
+# foo = Ref{Any}()
 grad_full = function(p, grad, sts, nd)
     tmp = zeros(typeof(p), nd, length(sts))
     for i in 1:nd
@@ -152,3 +152,6 @@ idx_A = findall(occursin.("A[", string.(jac)))
 
 ### Compute the DCM ###
 @time results = variationalbayes(idx_A, y_csd, derivatives, freqs, V, p, priors, 128)
+
+
+# J, iΣ, ϵ, Πθ_pr = foo[]

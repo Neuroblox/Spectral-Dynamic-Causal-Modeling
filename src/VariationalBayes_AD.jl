@@ -156,7 +156,6 @@ function transferfunction_fmri(w, idx_A, derivatives, params)   # relates to: sp
     nu = size(dfdu,2)         # number of inputs
     nk = size(V,2)            # number of modes
     S = zeros(Complex{real(eltype(dvdu))}, nw, ng, nu)
-
     for j = 1:nu
         for i = 1:ng
             for k = 1:nk
@@ -166,6 +165,7 @@ function transferfunction_fmri(w, idx_A, derivatives, params)   # relates to: sp
             end
         end
     end
+
     return S
 end
 
@@ -683,6 +683,8 @@ MTK Version
             # Conditional update of gradients and curvature
             dFdp  = -real(J' * iΣ * ϵ) - Πθ_pr * ϵ_θ    # check sign
             dFdpp = -real(J' * iΣ * J) - Πθ_pr
+            # Main.foo[] = J, iΣ, ϵ, Πθ_pr
+
             # decrease regularization
             v = min(v + 1/2, 4);
         else
