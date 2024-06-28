@@ -72,6 +72,14 @@ end
 
 using Plots
 
+"""
+Even though, theoretically, a VJP (Vector-Jacobian product - reverse autodiff) and a JVP (Jacobian-Vector product - forward-mode autodiff) 
+are similar—they compute a product of a Jacobian and a vector—they differ by the computational complexity of the operation. In short, 
+when you have a large number of parameters (hence a wide matrix), a JVP is less efficient computationally than a VJP, 
+and, conversely, a JVP is more efficient when the Jacobian matrix is a tall matrix.
+
+from: https://lux.csail.mit.edu/dev/tutorials/beginner/1_Basics
+"""
 nvarset = [10, 50, 100, 250, 500]
 ncolset = [10, 50, 100, 250, 500]
 nvarset = vcat(2,10:10:50)
