@@ -91,17 +91,25 @@ struct BalloonModel <: ObserverBlox
     end
 end
 
-
 # Lead field function for LFPs
+struct LeadField <: ObserverBlox
+    params
+    output
+    jcn
+    odesystem
+    namespace
 
-function leadfield(L, sts, nr, str; name)
-    @variables lfp(t)[1:nr]
-    vars = vcat(lfp, sts)
+    function LeadField(;name, namespace=nothing, L=0.0)
+        p = paramscoping(L=L)
+        L, = p
 
-    idx = [i for (i, s) in enumerate(string.(sts)) if occursin(str, s)]
-    eqs = Equation[]
-    for i = 1:nr
-        push!(eqs, lfp[i] ~ L[i]*sts[idx[i]])
+        sts = @variables lfp(t)=0.0 [irreducible=true, output=true, description="measurement"] jcn(t)=1.0 [input=true]
+
+        eqs = [
+            lfp ~ L * jcn
+        ]
+
+        sys = System(eqs, t; name=name)
+        new(p, Num(0), sts[2], sys, namespace)
     end
-    return ODESystem(eqs, t, vars, values(L); name=name)
 end
