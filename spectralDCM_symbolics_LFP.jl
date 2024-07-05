@@ -55,17 +55,22 @@ regions = Dict()
 
 @parameters r = 2.0/3.0
 @parameters lnτ_ss=0 lnτ_sp=0 lnτ_ii=0 lnτ_dp=0
+@parameters C=512.0 [tunable = false]    # TODO: SPM12 has this seemingly arbitrary 512 pre-factor in spm_fx_cmc.m
 for ii = 1:nd
     region = CanonicalMicroCircuitBlox(;namespace=global_ns, name=Symbol("r$(ii)₊cmc"), 
                                         τ_ss=exp(lnτ_ss)*0.002, τ_sp=exp(lnτ_sp)*0.002, τ_ii=exp(lnτ_ii)*0.016, τ_dp=exp(lnτ_dp)*0.028, 
                                         r_ss=r, r_sp=r, r_ii=r, r_dp=r)
     add_blox!(g, region)
-    regions[ii] = 2ii - 1    # store index of neural mass model
+    regions[ii] = nv(g)    # store index of neural mass model
+    input = ExternalInput(;name=Symbol("r$(ii)₊ei"), I=1.0)
+    add_blox!(g, input)
+    add_edge!(g, nv(g), nv(g) - 1, Dict(:weight => C))
+
     # add lead field (LFP measurement)
     measurement = LeadField(;name=Symbol("r$(ii)₊lf"))
     add_blox!(g, measurement)
     # connect measurement with neuronal signal
-    add_edge!(g, 2ii - 1, 2ii, Dict(:weight => 1.0))
+    add_edge!(g, nv(g) - 2, nv(g), Dict(:weight => 1.0))
 end
 
 nl = Int((nd^2-nd)/2)   # number of links unidirectional
@@ -97,13 +102,15 @@ end
 fullmodel = structural_simplify(fullmodel, split=false)
 
 # attribute initial conditions to states
-ds_states, idx_u, idx_measurement = get_dynamic_states(fullmodel)
-initcond = OrderedDict(ds_states .=> 0.0)
+sts, idx_sts = get_dynamic_states(fullmodel)
+idx_u = get_idx_tagged_vars(fullmodel, "ext_input")         # get index of external input state
+idx_measurement = get_eqidx_tagged_vars(fullmodel, "measurement")  # get index of equation of bold state
+initcond = OrderedDict(sts .=> 0.0)
 rnames = []
-map(x->push!(rnames, split(string(x), "₊")[1]), ds_states);
+map(x->push!(rnames, split(string(x), "₊")[1]), sts);
 rnames = unique(rnames);
 for (i, r) in enumerate(rnames)
-    for (j, s) in enumerate(ds_states[r .== map(x -> x[1], split.(string.(ds_states), "₊"))])
+    for (j, s) in enumerate(sts[r .== map(x -> x[1], split.(string.(sts), "₊"))])
         initcond[s] = x[i, j]
     end
 end
@@ -113,21 +120,22 @@ for par in tunable_parameters(fullmodel)
     modelparam[par] = Symbolics.getdefaultval(par)
 end
 np = length(modelparam)
-params_idx = Dict(:dspars => collect(1:np))
+indices = Dict(:dspars => collect(1:np))
 # Noise parameter mean
 modelparam[:lnα] = zeros(Float64, 2, nd);           # intrinsic fluctuations, ln(α) as in equation 2 of Friston et al. 2014 
 n = length(modelparam[:lnα]);
-params_idx[:lnα] = collect(np+1:np+n);
+indices[:lnα] = collect(np+1:np+n);
 np += n;
-modelparam[:lnβ] = [0.0, 0.0];           # global observation noise, ln(β) as above
+modelparam[:lnβ] = [-16.0, -16.0];           # global observation noise, ln(β) as above
 n = length(modelparam[:lnβ]);
-params_idx[:lnβ] = collect(np+1:np+n);
+indices[:lnβ] = collect(np+1:np+n);
 np += n;
-modelparam[:lnγ] = [0.0, 0.0];   # region specific observation noise
-params_idx[:lnγ] = collect(np+1:np+nd);
+modelparam[:lnγ] = [-16.0, -16.0];   # region specific observation noise
+indices[:lnγ] = collect(np+1:np+nd);
 np += nd
-params_idx[:u] = idx_u
-params_idx[:m] = idx_measurement
+indices[:u] = idx_u
+indices[:m] = idx_measurement
+indices[:sts] = idx_sts
 
 # define prior variances
 paramvariance = copy(modelparam)
@@ -154,9 +162,9 @@ hyperpriors = Dict(:Πλ_pr => hype["ihC"],            # prior metaparameter pre
                   );
 
 csdsetup = Dict(:p => 8, :freq => vec(vars["Hz"]), :dt => vars["dt"]);
-
-(state, setup) = setup_sDCM(data, fullmodel, initcond, csdsetup, priors, hyperpriors, params_idx, "LFP");
-for iter in 1:max_iter
+foo = Ref{Any}()
+(state, setup) = setup_sDCM(data, fullmodel, initcond, csdsetup, priors, hyperpriors, indices, "LFP");
+for iter in 1:1
     state.iter = iter
     run_sDCM_iteration!(state, setup)
     print("iteration: ", iter, " - F:", state.F[end] - state.F[2], " - dF predicted:", state.dF[end], "\n")
@@ -168,4 +176,3 @@ for iter in 1:max_iter
         end
     end
 end
-foo = Ref{Any}()

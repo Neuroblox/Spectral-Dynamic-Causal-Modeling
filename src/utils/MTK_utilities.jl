@@ -137,6 +137,16 @@ function (bc::BloxConnector)(
     accumulate_equation!(bc, eq)
 end
 
+function (bc::BloxConnector)(
+    bloxout::StimulusBlox,
+    bloxin::CanonicalMicroCircuitBlox;
+    kwargs...
+)
+
+    sysparts_in = get_blox_parts(bloxin)
+
+    bc(bloxout, sysparts_in[1]; kwargs...)
+end
 
 function (bc::BloxConnector)(
     bloxout::StimulusBlox,

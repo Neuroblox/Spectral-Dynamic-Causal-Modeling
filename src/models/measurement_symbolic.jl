@@ -99,7 +99,7 @@ struct LeadField <: ObserverBlox
     odesystem
     namespace
 
-    function LeadField(;name, namespace=nothing, L=0.0)
+    function LeadField(;name, namespace=nothing, L=1.0)
         p = paramscoping(L=L)
         L, = p
 

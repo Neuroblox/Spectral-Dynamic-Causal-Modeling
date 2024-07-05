@@ -63,8 +63,8 @@ mutable struct JansenRitSPM12 <: NeuralMassBlox
         τ, r = p
 
         sts    = @variables x(t)=1.0 [output=true] y(t)=1.0 jcn(t)=0.0 [input=true]
-        eqs    = [D(x) ~ y - ((2/τ)*x),
-                  D(y) ~ -x/(τ*τ) + jcn/τ]
+        eqs    = [D(x) ~ y,                                # TODO: shouldn't -2*x/τ be in this line? However, see Friston2012 and SPM12 implementation.
+                  D(y) ~ (-2*x - x/τ + jcn)/τ]
 
         sys = System(eqs, t, name=name)
         new(p, sts[1], sts[3], sys, namespace)

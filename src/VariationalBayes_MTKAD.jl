@@ -29,6 +29,8 @@ function transferfunction(ω, derivatives, params, indices)
     ∂f∂u = ∂f[indices[:sts], indices[:u]]
     ∂g∂x = ∂f[indices[:m], indices[:sts]]
 
+    Main.foo[] = ∂f∂x, ∂f∂u, ∂g∂x
+
     F = eigen(∂f∂x)
     Λ = F.values
     V = F.vectors
@@ -125,11 +127,10 @@ function csd_approx_lfp(ω, derivatives, params, params_idx)
         Gu[:, i] .+= exp(α[1, i]) .* ω.^(-exp(α[2, i]))
     end
     # global components and region specific observation noise (1/f or AR(1) form)
-    Gn = (exp(β[1]) - 2) * ω.^(-exp(β[2]))
-    Gs = (exp(γ[1]) - 2) * ω.^(-exp(γ[2]))  # this is really oddly implemented in SPM12. Completely unclear how this should be region specific
+    Gn = exp(β[1] - 2) * ω.^(-exp(β[2]))
+    Gs = exp(γ[1] - 2) * ω.^(-exp(γ[2]))  # this is really oddly implemented in SPM12. Completely unclear how this should be region specific
 
     S = transferfunction(ω, derivatives, params, params_idx)   # This is K(ω) in the equations of the spectral DCM paper.
-    Main.foo[] = Gu, S, Gn, Gs
 
     # predicted cross-spectral density
     G = zeros(eltype(S), nω, nd, nd);
