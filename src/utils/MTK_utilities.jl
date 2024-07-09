@@ -60,9 +60,19 @@ function (bc::BloxConnector)(
     end
 end
 
+function (bc::BloxConnector)(
+    bloxout::CanonicalMicroCircuitBlox,
+    bloxin::ObserverBlox;
+    kwargs...
+)
+    sysparts_out = get_blox_parts(bloxout)
+
+    bc(sysparts_out[2], bloxin; kwargs...)
+end
+
 # define a sigmoid function
 # @register_symbolic sigmoid(x, r) = one(x) / (one(x) + exp(-r*x))
-sigmoid(x, r) = one(x) / (one(x) + exp(-r*x))
+sigmoid(x, r) = one(x) / (one(x) + exp(-r*x)) - 0.5
 
 function (bc::BloxConnector)(
     bloxout::JansenRitSPM12, 
@@ -87,7 +97,7 @@ end
 
 function (bc::BloxConnector)(
     bloxout::NeuralMassBlox, 
-    bloxin::NeuralMassBlox; 
+    bloxin::NeuralMassBlox;
     kwargs...
 )
     sys_out = get_namespaced_sys(bloxout)
@@ -123,7 +133,41 @@ function (bc::BloxConnector)(
     push!(bc.weights, w)
     x = ModelingToolkit.namespace_expr(bloxout.output, sys_out, nameof(sys_out))
     eq = sys_in.jcn ~ x*w
-    
+
+    accumulate_equation!(bc, eq)
+end
+
+function (bc::BloxConnector)(
+    bloxout::StimulusBlox,
+    bloxin::CanonicalMicroCircuitBlox;
+    kwargs...
+)
+
+    sysparts_in = get_blox_parts(bloxin)
+
+    bc(bloxout, sysparts_in[1]; kwargs...)
+end
+
+function (bc::BloxConnector)(
+    bloxout::StimulusBlox,
+    bloxin::NeuralMassBlox;
+    weight=1
+)
+
+    sys_out = get_namespaced_sys(bloxout)
+    sys_in = get_namespaced_sys(bloxin)
+
+    w_name = Symbol("w_$(nameof(sys_out))_$(nameof(sys_in))")
+    if typeof(weight) == Num # Symbol
+        w = weight
+    else
+        w = only(@parameters $(w_name)=weight)
+    end    
+    push!(bc.weights, w)
+
+    x = ModelingToolkit.namespace_expr(bloxout.output, sys_out, nameof(sys_out))
+    eq = sys_in.jcn ~ x*w
+
     accumulate_equation!(bc, eq)
 end
 
@@ -280,7 +324,6 @@ end
     
     Function extracts states from the system that are dynamic variables, 
     get also indices of external inputs (u(t)) and measurements (like bold(t))
-
     Arguments:
     - `sys`: MTK system
 
@@ -291,19 +334,48 @@ end
 """
 function get_dynamic_states(sys)
     sts = []
-    idx_u = Int[]
-    idx_m = Int[]
+    idx = []
     for (i, s) in enumerate(unknowns(sys))
-        if getdescription(s) == "ext_input"
-            push!(idx_u, i)
-        elseif getdescription(s) == "measurement"
-            push!(idx_m, i)
-        else
+        if !((getdescription(s) == "ext_input") || (getdescription(s) == "measurement"))
             push!(sts, s)
+            push!(idx, i)
         end
     end
-    sts, idx_u, idx_m
+    return sts, idx
 end
+
+function get_eqidx_tagged_vars(sys, tag)
+    idx = Int[]
+    vars = []
+    eqs = equations(sys)
+    for s in unknowns(sys)
+        if getdescription(s) == tag
+            push!(vars, s)
+        end
+    end
+
+    for v in vars
+        for (i, e) in enumerate(eqs)
+            for s in Symbolics.get_variables(e)
+                if string(s) == string(v)
+                    push!(idx, i)
+                end 
+            end
+        end
+    end
+    return idx
+end
+
+function get_idx_tagged_vars(sys, tag)
+    idx = Int[]
+    for (i, s) in enumerate(unknowns(sys))
+        if (getdescription(s) == tag)
+            push!(idx, i)
+        end
+    end
+    return idx
+end
+
 
 """
     function addnontunableparams(param, model)

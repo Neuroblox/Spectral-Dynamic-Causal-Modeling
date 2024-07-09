@@ -23,19 +23,18 @@ variationalbayes : main routine that computes the variational Bayes estimate of 
 """
 
 
-function transferfunction_fmri(ω, derivatives, params, params_idx)
-    ∂f = derivatives(params[params_idx[:dspars]])
-    idx_ds = deleteat!([1:size(∂f, 1);], sort(vcat(params_idx[:bold], params_idx[:u])))
-    ∂f∂x = ∂f[idx_ds, idx_ds]
-    ∂f∂u = ∂f[idx_ds, params_idx[:u]]
-    ∂g∂x = ∂f[params_idx[:bold], idx_ds]
+function transferfunction(ω, derivatives, params, indices)
+    ∂f = derivatives(params[indices[:dspars]])
+    ∂f∂x = ∂f[indices[:sts], indices[:sts]]
+    ∂f∂u = ∂f[indices[:sts], indices[:u]]
+    ∂g∂x = ∂f[indices[:m], indices[:sts]]
 
     F = eigen(∂f∂x)
     Λ = F.values
     V = F.vectors
 
     ∂g∂v = ∂g∂x*V
-    ∂v∂u = V\∂f∂u               # u is external variable which we don't use right now. With external variable this would read V/dfdu
+    ∂v∂u = V\∂f∂u              # u is external variable.
 
     nω = size(ω, 1)            # number of frequencies
     ng = size(∂g∂x, 1)         # number of outputs
@@ -97,7 +96,7 @@ function csd_approx(ω, derivatives, params, params_idx)
             Gn[:,j,i] = Gn[:,i,j]
         end
     end
-    S = transferfunction_fmri(ω, derivatives, params, params_idx)   # This is K(ω) in the equations of the spectral DCM paper.
+    S = transferfunction(ω, derivatives, params, params_idx)   # This is K(ω) in the equations of the spectral DCM paper.
 
     # predicted cross-spectral density
     G = zeros(eltype(S), nω, nd, nd);
@@ -108,15 +107,59 @@ function csd_approx(ω, derivatives, params, params_idx)
     return G + Gn
 end
 
-@views function csd_fmri_mtf(freqs, p, derivatives, params, params_idx)   # alongside the above realtes to spm_csd_fmri_mtf.m
-    G = csd_approx(freqs, derivatives, params, params_idx)
-    dt = 1/(2*freqs[end])
-    # the following two steps are very opaque. They are taken from the SPM code but it is unclear what the purpose of this transformation and back-transformation is
-    # in particular it is also unclear why the order of the MAR is reduced by 1. My best guess is that this procedure smoothens the results.
-    # But this does not correspond to any equation in the papers nor is it commented in the SPM12 code. Friston conferms that likely it is
-    # to make y well behaved.
-    mar = csd2mar(G, freqs, dt, p-1)
-    y = mar2csd(mar, freqs)
+
+function csd_approx_lfp(ω, derivatives, params, params_idx)
+    # priors of spectral parameters
+    # ln(α) and ln(β), region specific fluctuations: ln(γ)
+    nω = length(ω)
+    nd = length(params_idx[:lnγ])
+    α = reshape(params[params_idx[:lnα]], nd, nd)
+    β = params[params_idx[:lnβ]]
+    γ = params[params_idx[:lnγ]]
+
+    # define function that implements spectra given in equation (2) of the paper "A DCM for resting state fMRI".
+    Gu = zeros(eltype(α), nω, nd)   # spectrum of neuronal innovations or intrinsic noise or system noise
+    Gn = zeros(eltype(β), nω)   # global spectrum of channel noise or observation noise or external noise
+    Gs = zeros(eltype(γ), nω)   # region specific spectrum of channel noise or observation noise or external noise
+    for i = 1:nd
+        Gu[:, i] .+= exp(α[1, i]) .* ω.^(-exp(α[2, i]))
+    end
+    # global components and region specific observation noise (1/f or AR(1) form)
+    Gn = exp(β[1] - 2) * ω.^(-exp(β[2]))
+    Gs = exp(γ[1] - 2) * ω.^(-exp(γ[2]))  # this is really oddly implemented in SPM12. Completely unclear how this should be region specific
+
+    S = transferfunction(ω, derivatives, params, params_idx)   # This is K(ω) in the equations of the spectral DCM paper.
+
+    # predicted cross-spectral density
+    G = zeros(eltype(S), nω, nd, nd);
+    for i = 1:nω
+        G[i,:,:] = S[i,:,:]*diagm(Gu[i,:])*S[i,:,:]'
+    end
+
+    for i = 1:nd
+        G[:,i,i] += Gs
+        for j = 1:nd
+            G[:,i,j] += Gn
+        end
+    end
+
+    return G
+end
+
+@views function csd_mtf(freqs, p, derivatives, params, params_idx, modality)   # alongside the above realtes to spm_csd_fmri_mtf.m
+    if modality == "fMRI"
+        G = csd_approx(freqs, derivatives, params, params_idx)
+
+        dt = 1/(2*freqs[end])
+        # the following two steps are very opaque. They are taken from the SPM code but it is unclear what the purpose of this transformation and back-transformation is
+        # in particular it is also unclear why the order of the MAR is reduced by 1. My best guess is that this procedure smoothens the results.
+        # But this does not correspond to any equation in the papers nor is it commented in the SPM12 code. NB: Friston conferms that likely it is
+        # to make y well behaved.
+        mar = csd2mar(G, freqs, dt, p-1)
+        y = mar2csd(mar, freqs)    
+    elseif modality == "LFP"
+        y = csd_approx_lfp(freqs, derivatives, params, params_idx)
+    end
     if real(eltype(y)) <: Dual
         y_vals = Complex.((p->p.value).(real(y)), (p->p.value).(imag(y)))
         y_part = (p->p.partials).(real(y)) + (p->p.partials).(imag(y))*im
@@ -148,14 +191,19 @@ end
     -- `Πλ_pr`      : prior precision matrix for λ hyperparameter(s)
     -- `μλ_pr`      : prior mean(s) for λ hyperparameter(s)
     - `params_idx`  : indices to separate model parameters from other parameters. Needed for the computation of AD gradient.
+    - `modality`    : which modality? Currently fMRI and LFP is available.
 """
-function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params_idx)
+function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params_idx, modality)
     # compute cross-spectral density
     dt = csdsetup[:dt];              # order of MAR. Hard-coded in SPM12 with this value. We will use the same for now.
     ω = csdsetup[:freq];             # frequencies at which the CSD is evaluated
     p = csdsetup[:p];                # order of MAR
     mar = mar_ml(Matrix(data), p);   # compute MAR from time series y and model order p
     y_csd = mar2csd(mar, ω, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
+    if modality == "LFP"
+        vars = matread("speedandaccuracy/matlab_cmc.mat");
+        y_csd = vars["csd"]
+    end
 
     jac_fg = generate_jacobian(model, expression = Val{false})[1]   # compute symbolic jacobian.
 
@@ -166,11 +214,15 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
     Σθ_pr = diagm(vecparam(OrderedDict(priors.name .=> priors.variance)))
 
     ### Collect prior means and covariances ###
-    Q = csd_Q(y_csd);                 # compute functional connectivity prior Q. See Friston etal. 2007 Appendix A
+    if haskey(hyperpriors, :Q)
+        Q = hyperpriors[:Q];
+    else
+        Q = csd_Q(y_csd);                 # compute functional connectivity prior Q. See Friston etal. 2007 Appendix A
+    end
     nq = 1                            # TODO: this is hard-coded, need to make this compliant with csd_Q
     nh = size(Q, 3)                   # number of precision components (this is the same as above, but may differ)
 
-    f = params -> csd_fmri_mtf(ω, p, derivatives, params, params_idx)
+    f = params -> csd_mtf(ω, p, derivatives, params, params_idx, modality)
 
     np = length(μθ_pr)     # number of parameters
     ny = length(y_csd)     # total number of response variables
@@ -181,9 +233,9 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
         -4,            # log ascent rate
         [-Inf],        # free energy
         [],            # delta free energy
-        8*ones(nh),    # metaparameter, initial condition. TODO: why are we not just using the prior mean?
+        hyperpriors[:μλ_pr],    # metaparameter, initial condition. TODO: why are we not just using the prior mean?
         zeros(np),     # parameter estimation error ϵ_θ
-        [zeros(np), 8*ones(nh)],      # memorize reset state
+        [zeros(np), hyperpriors[:μλ_pr]],      # memorize reset state
         μθ_pr,         # parameter posterior mean
         Σθ_pr,         # parameter posterior covariance
         zeros(np),
@@ -237,7 +289,8 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
     Q = setup.Q
 
     dfdp = jacobian(f, μθ_po)
-
+    # Main.foo[] = dfdp
+    # dfdp = matread("/home/david/transfer_tmp.mat")["dfdp"][:, [11, 5, 6, 3, 4, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 1, 2]]
     norm_dfdp = matlab_norm(dfdp, Inf);
     revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 

@@ -17,47 +17,12 @@ TODO:
     - are there alternatives to small perturbations of initial conditions to introduce numerical stability?
 =#
 
-abstract type AbstractBlox end # Blox is the abstract type for Blox that are displayed in the GUI
-abstract type AbstractComponent end
-abstract type BloxConnection end
-
-# subtypes of Blox define categories of Blox that are displayed in separate sections of the GUI
-abstract type AbstractNeuronBlox <: AbstractBlox end
-abstract type NeuralMassBlox <: AbstractBlox end
-abstract type CompositeBlox <: AbstractBlox end
-abstract type ObserverBlox end   # not AbstractBlox since it should not show up in the GUI
-
-# struct types for Variational Laplace
-mutable struct VLState
-    iter::Int                    # number of iteration
-    v::Float64                   # log ascent rate of SPM style Levenberg-Marquardt optimization
-    F::Vector{Float64}           # free energy vector (store at each iteration)
-    dF::Vector{Float64}          # predicted free energy changes (store at each iteration)
-    λ::Vector{Float64}           # hyperparameter
-    ϵ_θ::Vector{Float64}         # prediction error of parameters θ
-    reset_state::Vector{Any}     # store state to reset to [ϵ_θ and λ] when the free energy deteriorates
-    μθ_po::Vector{Float64}       # posterior expectation value of parameters 
-    Σθ_po::Matrix{Float64}       # posterior covariance matrix of parameters
-    dFdθ::Vector{Float64}        # free energy gradient w.r.t. parameters
-    dFdθθ::Matrix{Float64}       # free energy Hessian w.r.t. parameters
-end
-
-struct VLSetup
-    model_at_x0                               # model evaluated at initial conditions
-    y_csd::Array{Complex}                     # cross-spectral density approximated by fitting MARs to data
-    tolerance::Float64                        # convergence criterion
-    systemnums::Vector{Int}                   # several integers -> np: n. parameters, ny: n. datapoints, nq: n. Q matrices, nh: n. hyperparameters
-    systemvecs::Vector{Vector{Float64}}       # μθ_pr: prior expectation values of parameters and μλ_pr: prior expectation values of hyperparameters
-    systemmatrices::Vector{Matrix{Float64}}   # Πθ_pr: prior precision matrix of parameters, Πλ_pr: prior precision matrix of hyperparameters
-    Q::Matrix{Complex}                        # linear decomposition of precision matrix of parameters, typically just one matrix, the empirical correlation matrix
-end
-
+include("src/utils/typedefinitions.jl")
 include("src/VariationalBayes_MTKAD.jl")
 include("src/utils/mar.jl")
 include("src/models/neuraldynamics_symbolic.jl")
 include("src/models/measurement_symbolic.jl")
 include("src/utils/MTK_utilities.jl")
-
 
 ### Load data ###
 vars = matread("../Spectral-DCM/speedandaccuracy/matlab0.01_3regions.mat");
@@ -69,18 +34,22 @@ max_iter = 128                       # maximum number of iterations
 ########## assemble the model ##########
 g = MetaDiGraph()
 regions = Dict()
-
+foo = Ref{Any}()
 # decay parameter for hemodynamics lnκ and ratio of intra- to extra-vascular components lnϵ is shared across brain regions 
-@parameters lnκ=0.0 [tunable = true] lnϵ=0.0 [tunable=true]   # setting tunable=true means that these parameters are optimized
+@parameters lnκ=0.0 [tunable = true] lnϵ=0.0 [tunable=true] C=1/16 [tunable = false]   # setting tunable=true means that these parameters are optimized
 for ii = 1:nr
     region = LinearNeuralMass(;name=Symbol("r$(ii)₊lm"))
     add_blox!(g, region)
-    regions[ii] = 2ii - 1    # store index of neural mass model
+    regions[ii] = nv(g)    # store index of neural mass model
+    input = ExternalInput(;name=Symbol("r$(ii)₊ei"), I=1.0)
+    add_blox!(g, input)
+    add_edge!(g, nv(g), nv(g) - 1, Dict(:weight => C))
+
     # add hemodynamic response model and observation model (BOLD signal)
     measurement = BalloonModel(;name=Symbol("r$(ii)₊bm"), lnκ=lnκ, lnϵ=lnϵ)
     add_blox!(g, measurement)
     # connect measurement with neuronal signal
-    add_edge!(g, 2ii - 1, 2ii, Dict(:weight => 1.0))
+    add_edge!(g, nv(g) - 2, nv(g), Dict(:weight => 1.0))
 end
 
 # add symbolic weights
@@ -98,13 +67,15 @@ end
 fullmodel = structural_simplify(fullmodel, split=false)
 
 # attribute initial conditions to states
-ds_states, idx_u, idx_bold = get_dynamic_states(fullmodel)
-initcond = OrderedDict(ds_states .=> 0.0)
+sts, idx_sts = get_dynamic_states(fullmodel)
+idx_u = get_idx_tagged_vars(fullmodel, "ext_input")         # get index of external input state
+idx_bold = get_eqidx_tagged_vars(fullmodel, "measurement")  # get index of equation of bold state
+initcond = OrderedDict(sts .=> 0.0)
 rnames = []
-map(x->push!(rnames, split(string(x), "₊")[1]), ds_states);
+map(x->push!(rnames, split(string(x), "₊")[1]), sts);
 rnames = unique(rnames);
 for (i, r) in enumerate(rnames)
-    for (j, s) in enumerate(ds_states[r .== map(x -> x[1], split.(string.(ds_states), "₊"))])
+    for (j, s) in enumerate(sts[r .== map(x -> x[1], split.(string.(sts), "₊"))])
         initcond[s] = x[i, j]
     end
 end
@@ -114,27 +85,28 @@ for par in tunable_parameters(fullmodel)
     modelparam[par] = Symbolics.getdefaultval(par)
 end
 np = length(modelparam)
-params_idx = Dict(:dspars => collect(1:np))
+indices = Dict(:dspars => collect(1:np))
 # Noise parameter mean
 modelparam[:lnα] = [0.0, 0.0];           # intrinsic fluctuations, ln(α) as in equation 2 of Friston et al. 2014 
 n = length(modelparam[:lnα]);
-params_idx[:lnα] = collect(np+1:np+n);
+indices[:lnα] = collect(np+1:np+n);
 np += n;
 modelparam[:lnβ] = [0.0, 0.0];           # global observation noise, ln(β) as above
 n = length(modelparam[:lnβ]);
-params_idx[:lnβ] = collect(np+1:np+n);
+indices[:lnβ] = collect(np+1:np+n);
 np += n;
 modelparam[:lnγ] = zeros(Float64, nr);   # region specific observation noise
-params_idx[:lnγ] = collect(np+1:np+nr);
+indices[:lnγ] = collect(np+1:np+nr);
 np += nr
-params_idx[:u] = idx_u
-params_idx[:bold] = idx_bold
+indices[:u] = idx_u
+indices[:m] = idx_bold
+indices[:sts] = idx_sts
 
 # define prior variances
 paramvariance = copy(modelparam)
-paramvariance[:lnγ] = ones(Float64, nr)./64.0;
 paramvariance[:lnα] = ones(Float64, length(modelparam[:lnα]))./64.0; 
 paramvariance[:lnβ] = ones(Float64, length(modelparam[:lnβ]))./64.0;
+paramvariance[:lnγ] = ones(Float64, nr)./64.0;
 for (k, v) in paramvariance
     if occursin("A[", string(k))
         paramvariance[k] = vars["pC"][1, 1]
@@ -154,7 +126,7 @@ hyperpriors = Dict(:Πλ_pr => vars["ihC"]*ones(1, 1),   # prior metaparameter p
 
 csdsetup = Dict(:p => 8, :freq => vec(vars["Hz"]), :dt => vars["dt"]);
 
-(state, setup) = setup_sDCM(data, fullmodel, initcond, csdsetup, priors, hyperpriors, params_idx);
+(state, setup) = setup_sDCM(data, fullmodel, initcond, csdsetup, priors, hyperpriors, indices, "fMRI");
 for iter in 1:max_iter
     state.iter = iter
     run_sDCM_iteration!(state, setup)
@@ -167,4 +139,3 @@ for iter in 1:max_iter
         end
     end
 end
-print("maxixmum iterations reached\n")

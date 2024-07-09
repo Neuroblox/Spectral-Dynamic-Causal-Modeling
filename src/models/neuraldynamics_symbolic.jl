@@ -28,14 +28,24 @@ struct LinearNeuralMass <: NeuralMassBlox
     function LinearNeuralMass(;name, namespace=nothing, C=0.0625)
         p = paramscoping(C=C)
         C = ModelingToolkit.setmetadata(p[1], ModelingToolkit.VariableTunable, false)   # TODO: change paramscoping to be able to pass tunable flag
-        sts = @variables x(t)=0.0 [output=true] jcn(t)=0.0 [input=true] u(t) [irreducible=true, description="ext_input"]
-        eqs = [D(x) ~ jcn + C*u,
-                u ~ 1.0]
+        sts = @variables x(t)=0.0 [output=true] jcn(t)=0.0 [input=true]
+        eqs = [D(x) ~ jcn]
         sys = System(eqs, t, name=name)
         new(p, sts[1], sts[2], sys, namespace)
     end
 end
 
+mutable struct ExternalInput <: StimulusBlox
+    namespace
+    output::Num
+    odesystem::ODESystem
+    function ExternalInput(;name, I=1.0, namespace=nothing)
+        sts = @variables u(t) [irreducible=true, description="ext_input"]
+        eqs = [u ~ I]
+        odesys = System(eqs, t, sts, []; name=name)
+        new(namespace, sts[1], odesys)
+    end
+end
 
 # Canonical micro-circuit model
 
@@ -53,10 +63,10 @@ mutable struct JansenRitSPM12 <: NeuralMassBlox
         τ, r = p
 
         sts    = @variables x(t)=1.0 [output=true] y(t)=1.0 jcn(t)=0.0 [input=true]
-        eqs    = [D(x) ~ y - ((2/τ)*x),
-                  D(y) ~ -x/(τ*τ) + jcn/τ]
+        eqs    = [D(x) ~ y,                                # TODO: shouldn't -2*x/τ be in this line? However, see Friston2012 and SPM12 implementation.
+                  D(y) ~ (-2*y - x/τ + jcn)/τ]
 
-        sys = System(eqs, name=name)
+        sys = System(eqs, t, name=name)
         new(p, sts[1], sts[3], sys, namespace)
     end
 end
@@ -75,17 +85,17 @@ mutable struct CanonicalMicroCircuitBlox <: CompositeBlox
         g = MetaDiGraph()
         sblox_parts = vcat(ss, sp, ii, dp)
         add_blox!.(Ref(g), sblox_parts)
-
-        add_edge!(g, 1, 1, :weight, -800.0)
-        add_edge!(g, 2, 1, :weight, -800.0)
-        add_edge!(g, 3, 1, :weight, -800.0)
-        add_edge!(g, 1, 2, :weight,  800.0)
-        add_edge!(g, 2, 2, :weight, -800.0)
-        add_edge!(g, 1, 3, :weight,  800.0)
-        add_edge!(g, 3, 3, :weight, -800.0)
-        add_edge!(g, 4, 3, :weight,  400.0)
-        add_edge!(g, 3, 4, :weight, -400.0)
-        add_edge!(g, 4, 4, :weight, -200.0)
+        @parameters w=1.0 [tunable=false]
+        add_edge!(g, 1, 1, :weight, -800.0*w)
+        add_edge!(g, 2, 1, :weight, -800.0*w)
+        add_edge!(g, 3, 1, :weight, -1600.0*w)
+        add_edge!(g, 1, 2, :weight,  800.0*w)
+        add_edge!(g, 2, 2, :weight, -800.0*w)
+        add_edge!(g, 1, 3, :weight,  800.0*w)
+        add_edge!(g, 3, 3, :weight, -800.0*w)
+        add_edge!(g, 4, 3, :weight,  400.0*w)
+        add_edge!(g, 3, 4, :weight, -400.0*w)
+        add_edge!(g, 4, 4, :weight, -200.0*w)
 
         # Construct a BloxConnector object from the graph
         # containing all connection equations from lower levels and this level.
