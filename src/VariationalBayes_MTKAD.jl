@@ -29,8 +29,6 @@ function transferfunction(ω, derivatives, params, indices)
     ∂f∂u = ∂f[indices[:sts], indices[:u]]
     ∂g∂x = ∂f[indices[:m], indices[:sts]]
 
-    Main.foo[] = ∂f∂x, ∂f∂u, ∂g∂x
-
     F = eigen(∂f∂x)
     Λ = F.values
     V = F.vectors
@@ -151,16 +149,17 @@ end
 @views function csd_mtf(freqs, p, derivatives, params, params_idx, modality)   # alongside the above realtes to spm_csd_fmri_mtf.m
     if modality == "fMRI"
         G = csd_approx(freqs, derivatives, params, params_idx)
+
+        dt = 1/(2*freqs[end])
+        # the following two steps are very opaque. They are taken from the SPM code but it is unclear what the purpose of this transformation and back-transformation is
+        # in particular it is also unclear why the order of the MAR is reduced by 1. My best guess is that this procedure smoothens the results.
+        # But this does not correspond to any equation in the papers nor is it commented in the SPM12 code. NB: Friston conferms that likely it is
+        # to make y well behaved.
+        mar = csd2mar(G, freqs, dt, p-1)
+        y = mar2csd(mar, freqs)    
     elseif modality == "LFP"
-        G = csd_approx_lfp(freqs, derivatives, params, params_idx)
+        y = csd_approx_lfp(freqs, derivatives, params, params_idx)
     end
-    dt = 1/(2*freqs[end])
-    # the following two steps are very opaque. They are taken from the SPM code but it is unclear what the purpose of this transformation and back-transformation is
-    # in particular it is also unclear why the order of the MAR is reduced by 1. My best guess is that this procedure smoothens the results.
-    # But this does not correspond to any equation in the papers nor is it commented in the SPM12 code. NB: Friston conferms that likely it is
-    # to make y well behaved.
-    mar = csd2mar(G, freqs, dt, p-1)
-    y = mar2csd(mar, freqs)
     if real(eltype(y)) <: Dual
         y_vals = Complex.((p->p.value).(real(y)), (p->p.value).(imag(y)))
         y_part = (p->p.partials).(real(y)) + (p->p.partials).(imag(y))*im
@@ -234,9 +233,9 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
         -4,            # log ascent rate
         [-Inf],        # free energy
         [],            # delta free energy
-        8*ones(nh),    # metaparameter, initial condition. TODO: why are we not just using the prior mean?
+        hyperpriors[:μλ_pr],    # metaparameter, initial condition. TODO: why are we not just using the prior mean?
         zeros(np),     # parameter estimation error ϵ_θ
-        [zeros(np), 8*ones(nh)],      # memorize reset state
+        [zeros(np), hyperpriors[:μλ_pr]],      # memorize reset state
         μθ_pr,         # parameter posterior mean
         Σθ_pr,         # parameter posterior covariance
         zeros(np),
@@ -290,7 +289,8 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
     Q = setup.Q
 
     dfdp = jacobian(f, μθ_po)
-
+    # Main.foo[] = dfdp
+    # dfdp = matread("/home/david/transfer_tmp.mat")["dfdp"][:, [11, 5, 6, 3, 4, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 1, 2]]
     norm_dfdp = matlab_norm(dfdp, Inf);
     revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 

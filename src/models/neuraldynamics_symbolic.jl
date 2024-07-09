@@ -64,7 +64,7 @@ mutable struct JansenRitSPM12 <: NeuralMassBlox
 
         sts    = @variables x(t)=1.0 [output=true] y(t)=1.0 jcn(t)=0.0 [input=true]
         eqs    = [D(x) ~ y,                                # TODO: shouldn't -2*x/τ be in this line? However, see Friston2012 and SPM12 implementation.
-                  D(y) ~ (-2*x - x/τ + jcn)/τ]
+                  D(y) ~ (-2*y - x/τ + jcn)/τ]
 
         sys = System(eqs, t, name=name)
         new(p, sts[1], sts[3], sys, namespace)
@@ -85,10 +85,10 @@ mutable struct CanonicalMicroCircuitBlox <: CompositeBlox
         g = MetaDiGraph()
         sblox_parts = vcat(ss, sp, ii, dp)
         add_blox!.(Ref(g), sblox_parts)
-        @parameters w=1 [tunable=false]
+        @parameters w=1.0 [tunable=false]
         add_edge!(g, 1, 1, :weight, -800.0*w)
         add_edge!(g, 2, 1, :weight, -800.0*w)
-        add_edge!(g, 3, 1, :weight, -800.0*w)
+        add_edge!(g, 3, 1, :weight, -1600.0*w)
         add_edge!(g, 1, 2, :weight,  800.0*w)
         add_edge!(g, 2, 2, :weight, -800.0*w)
         add_edge!(g, 1, 3, :weight,  800.0*w)

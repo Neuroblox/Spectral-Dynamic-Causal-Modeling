@@ -72,7 +72,7 @@ end
 
 # define a sigmoid function
 # @register_symbolic sigmoid(x, r) = one(x) / (one(x) + exp(-r*x))
-sigmoid(x, r) = one(x) / (one(x) + exp(-r*x))
+sigmoid(x, r) = one(x) / (one(x) + exp(-r*x)) - 0.5
 
 function (bc::BloxConnector)(
     bloxout::JansenRitSPM12, 
