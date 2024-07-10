@@ -53,13 +53,13 @@ g = MetaDiGraph()
 global_ns = :g # global namespace
 regions = Dict()
 
-@parameters r = 0.0
+@parameters lnr = 0.0
 @parameters lnτ_ss=0 lnτ_sp=0 lnτ_ii=0 lnτ_dp=0
 @parameters C=512.0 [tunable = false]    # TODO: SPM12 has this seemingly arbitrary 512 pre-factor in spm_fx_cmc.m
 for ii = 1:nd
     region = CanonicalMicroCircuitBlox(;namespace=global_ns, name=Symbol("r$(ii)₊cmc"), 
                                         τ_ss=exp(lnτ_ss)*0.002, τ_sp=exp(lnτ_sp)*0.002, τ_ii=exp(lnτ_ii)*0.016, τ_dp=exp(lnτ_dp)*0.028, 
-                                        r_ss=exp(r)*2.0/3, r_sp=exp(r)*2.0/3, r_ii=exp(r)*2.0/3, r_dp=exp(r)*2.0/3)
+                                        r_ss=exp(lnr)*2.0/3, r_sp=exp(lnr)*2.0/3, r_ii=exp(lnr)*2.0/3, r_dp=exp(lnr)*2.0/3)
     add_blox!(g, region)
     regions[ii] = nv(g)    # store index of neural mass model
     input = ExternalInput(;name=Symbol("r$(ii)₊ei"), I=1.0)

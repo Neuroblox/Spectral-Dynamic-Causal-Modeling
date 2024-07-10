@@ -289,8 +289,6 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
     Q = setup.Q
 
     dfdp = jacobian(f, μθ_po)
-    # Main.foo[] = dfdp
-    # dfdp = matread("/home/david/transfer_tmp.mat")["dfdp"][:, [11, 5, 6, 3, 4, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 1, 2]]
     norm_dfdp = matlab_norm(dfdp, Inf);
     revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
