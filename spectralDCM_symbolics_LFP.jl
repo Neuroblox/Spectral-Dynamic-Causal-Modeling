@@ -145,7 +145,7 @@ paramvariance[:lnγ] = ones(Float64, nd)./128.0;
 for (k, v) in paramvariance
     if occursin("a_", string(k))
         paramvariance[k] = 1/16.0
-    elseif "r" == string(k)
+    elseif "lnr" == string(k)
         paramvariance[k] = 1/64.0;
     elseif occursin("lnτ", string(k))
         paramvariance[k] = 1/32.0;

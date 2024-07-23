@@ -47,6 +47,36 @@ mutable struct ExternalInput <: StimulusBlox
     end
 end
 
+"""
+Ornstein-Uhlenbeck process Blox
+
+variables:
+    x(t):  value
+    jcn:   input 
+parameters:
+    τ:      relaxation time
+	μ:      average value
+	σ:      random noise (variance of OU process is τ*σ^2/2)
+returns:
+    an ODE System (but with brownian parameters)
+"""
+mutable struct OUBlox <: StimulusBlox
+    # all parameters are Num as to allow symbolic expressions
+    namespace
+    output::Num
+    odesystem::ODESystem
+    function OUBlox(;name, namespace=nothing, μ=0.0, σ=1.0, τ=1.0)
+        p = paramscoping(μ=μ, τ=τ, σ=σ)
+        μ, τ, σ = p
+        @variables x(t)=1.0 [output=true]
+        @brownian v
+
+        eqs = [D(x) ~ -(x-μ)/τ + sqrt(2/τ)*σ*v]
+        sys = System(eqs, t, name=name)
+        new(namespace, sys.x, sys)
+    end
+end
+
 # Canonical micro-circuit model
 
 """

@@ -34,7 +34,7 @@ max_iter = 128                       # maximum number of iterations
 ########## assemble the model ##########
 g = MetaDiGraph()
 regions = Dict()
-foo = Ref{Any}()
+
 # decay parameter for hemodynamics lnκ and ratio of intra- to extra-vascular components lnϵ is shared across brain regions 
 @parameters lnκ=0.0 [tunable = true] lnϵ=0.0 [tunable=true] C=1/16 [tunable = false]   # setting tunable=true means that these parameters are optimized
 for ii = 1:nr
