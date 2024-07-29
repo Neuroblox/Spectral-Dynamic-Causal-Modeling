@@ -33,10 +33,6 @@ dt = vars["dt"];
 freqs = vec(vars["Hz"]);
 max_iter = 128                       # maximum number of iterations
 
-# p = 8;                               # order of MAR, it is hard-coded in SPM12 with this value. We will just use the same for now.
-# mar = mar_ml(y, p);                  # compute MAR from time series y and model order p
-# y_csd = mar2csd(mar, freqs, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
-# y_csd = vars["csd"]
 ### Define priors and initial conditions ###
 x = vars["x"];                       # initial condition of dynamic variabls
 
@@ -47,7 +43,7 @@ regions = Dict()
 
 @parameters lnr = 0.0
 @parameters lnτ_ss=0 lnτ_sp=0 lnτ_ii=0 lnτ_dp=0
-@parameters C=512.0 [tunable = false]    # TODO: SPM12 has this seemingly arbitrary 512 pre-factor in spm_fx_cmc.m
+@parameters C=512.0 [tunable = false]    # TODO: SPM12 has this seemingly arbitrary 512 pre-factor in spm_fx_cmc.m. Can we understand why?
 for ii = 1:nd
     region = CanonicalMicroCircuitBlox(;namespace=global_ns, name=Symbol("r$(ii)₊cmc"), 
                                         τ_ss=exp(lnτ_ss)*0.002, τ_sp=exp(lnτ_sp)*0.002, τ_ii=exp(lnτ_ii)*0.016, τ_dp=exp(lnτ_dp)*0.028, 

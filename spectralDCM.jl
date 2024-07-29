@@ -10,17 +10,12 @@ using OrderedCollections
 using SparseDiffTools
 Random.seed!(101);
 
-# simple dispatch for vec to deal with 1xN matrices
-function Base.vec(x::T) where (T <: Real)
-    return x*ones(1)
-end
-
-include("src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
-include("src/mar.jl")                      # multivariate auto-regressive model functions
+include("src/models/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
+include("src/VariationalBayes_spm12.jl")             # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/utils/mar.jl")                       # multivariate auto-regressive model functions
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("../Spectral-DCM/speedandaccuracy/matlab0.01_30regions.mat");
+vars = matread("../Spectral-DCM/speedandaccuracy/matlab0.01_3regions.mat");
 y = vars["data"];
 nd = size(y, 2);
 dt = vars["dt"];
@@ -69,7 +64,7 @@ priors = Dict(:μ => OrderedDict{Any, Any}(
               :Σ => Dict(
                          :Πθ_pr => inv(θΣ),           # prior model parameter precision
                          :Πλ_pr => Πλ_p,              # prior metaparameter precision
-                         :μλ_pr => vec(vars["hE"]),   # prior metaparameter mean
+                         :μλ_pr => [vars["hE"]],   # prior metaparameter mean
                          :Q => Q                      # decomposition of model parameter covariance
                         )
              );
