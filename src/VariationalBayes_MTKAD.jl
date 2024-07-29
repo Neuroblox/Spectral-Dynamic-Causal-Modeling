@@ -8,7 +8,7 @@ include("utils/helperfunctions.jl")
 include("utils/helperfunctions_AD.jl")
 
 """
-spectralDCM.jl
+VariationalBayes_MTKAD.jl
 
 Main functions to compute a spectral DCM.
 
@@ -25,6 +25,7 @@ variationalbayes : main routine that computes the variational Bayes estimate of 
 
 function transferfunction(ω, derivatives, params, indices)
     ∂f = derivatives(params[indices[:dspars]])
+    # dissect into Jacobian w.r.t. dynamic variables as well as partial derivatives wrt input variables and gradient of measurement function
     ∂f∂x = ∂f[indices[:sts], indices[:sts]]
     ∂f∂u = ∂f[indices[:sts], indices[:u]]
     ∂g∂x = ∂f[indices[:m], indices[:sts]]
@@ -229,15 +230,15 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
 
     # variational laplace state variables
     vlstate = VLState(
-        0,             # iter
-        -4,            # log ascent rate
-        [-Inf],        # free energy
-        [],            # delta free energy
-        hyperpriors[:μλ_pr],    # metaparameter, initial condition. TODO: why are we not just using the prior mean?
-        zeros(np),     # parameter estimation error ϵ_θ
+        0,                     # iter
+        -4,                    # log ascent rate
+        [-Inf],                # free energy
+        [],                    # delta free energy
+        hyperpriors[:μλ_pr],   # metaparameter, initial condition. TODO: why are we not just using the prior mean?
+        zeros(np),             # parameter estimation error ϵ_θ
         [zeros(np), hyperpriors[:μλ_pr]],      # memorize reset state
-        μθ_pr,         # parameter posterior mean
-        Σθ_pr,         # parameter posterior covariance
+        μθ_pr,                 # parameter posterior mean
+        Σθ_pr,                 # parameter posterior covariance
         zeros(np),
         zeros(np, np)
     )

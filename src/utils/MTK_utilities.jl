@@ -118,8 +118,6 @@ function (bc::BloxConnector)(
     bloxin::ObserverBlox; 
     weight=1
 )
-    # Need t for the delay term
-    @variables t
 
     sys_out = get_namespaced_sys(bloxout)
     sys_in = get_namespaced_sys(bloxin)
@@ -175,7 +173,7 @@ end
 
 function get_namespaced_sys(blox)
     sys = get_sys(blox)
-    ODESystem(
+    System(
         equations(sys), 
         independent_variable(sys), 
         unknowns(sys), 
@@ -242,7 +240,7 @@ function input_equations(blox)
                 inp ~ 0, 
                 sys,
                 namespaced_name(inner_namespaceof(blox), nameof(blox))
-            ) 
+            )
         else
             ModelingToolkit.namespace_equation(
                 sys_eqs[idx],
@@ -454,26 +452,22 @@ function system_from_graph(g::MetaDiGraph, p::Vector{Num}; name, t_block=missing
 end
 
 function system_from_graph(g::MetaDiGraph, bc::BloxConnector; name, t_block=missing)
-    # @variables t
     blox_syss = get_sys(g)
 
     connection_eqs = get_equations_with_state_lhs(bc)
-    
-    return compose(ODESystem(connection_eqs, t, [], params(bc); name), blox_syss)
+    return compose(System(connection_eqs, t, [], params(bc); name), blox_syss)
 end
 
-function system_from_graph(g::MetaDiGraph, bc::BloxConnector, p::Vector{Num}; name, t_block=missing)
-    # @variables t
-    blox_syss = get_sys(g)
+# function system_from_graph(g::MetaDiGraph, bc::BloxConnector, p::Vector{Num}; name, t_block=missing)
+#     blox_syss = get_sys(g)
 
-    connection_eqs = get_equations_with_state_lhs(bc)
+#     connection_eqs = get_equations_with_state_lhs(bc)
     
-    cbs = identity.(get_callbacks(g, bc; t_block))
-    
-    return compose(ODESystem(connection_eqs, t, [], vcat(params(bc), p); name, discrete_events = cbs), blox_syss)
-end
+#     cbs = identity.(get_callbacks(g, bc; t_block))
+
+#     return compose(System(connection_eqs, t, [], vcat(params(bc), p); name, discrete_events = cbs), blox_syss)
+# end
 
 function system_from_parts(parts::AbstractVector; name)
-    # @variables t
     return compose(ODESystem(Equation[], t, [], []; name), get_sys.(parts))
 end

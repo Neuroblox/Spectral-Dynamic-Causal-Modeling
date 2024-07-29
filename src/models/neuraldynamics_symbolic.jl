@@ -40,15 +40,44 @@ mutable struct ExternalInput <: StimulusBlox
     output::Num
     odesystem::ODESystem
     function ExternalInput(;name, I=1.0, namespace=nothing)
-        sts = @variables u(t) [irreducible=true, description="ext_input"]
+        sts = @variables u(t)=0.0 [irreducible=true, description="ext_input"]
         eqs = [u ~ I]
         odesys = System(eqs, t, sts, []; name=name)
         new(namespace, sts[1], odesys)
     end
 end
 
-# Canonical micro-circuit model
+"""
+Ornstein-Uhlenbeck process Blox
 
+variables:
+    x(t):  value
+    jcn:   input 
+parameters:
+    τ:      relaxation time
+	μ:      average value
+	σ:      random noise (variance of OU process is τ*σ^2/2)
+returns:
+    an ODE System (but with brownian parameters)
+"""
+mutable struct OUBlox <: StimulusBlox
+    # all parameters are Num as to allow symbolic expressions
+    namespace
+    output::Num
+    odesystem::ODESystem
+    function OUBlox(;name, namespace=nothing, μ=0.0, σ=1.0, τ=1.0)
+        p = paramscoping(μ=μ, τ=τ, σ=σ)
+        μ, τ, σ = p
+        sts = @variables x(t)=0.0 [output=true]
+        @brownian w
+
+        eqs = [D(x) ~ -(x-μ)/τ + sqrt(2/τ)*σ*w]
+        sys = System(eqs, t, name=name)
+        new(namespace, sts[1], sys)
+    end
+end
+
+# Canonical micro-circuit model
 """
 Jansen-Rit model block for canonical micro circuit, analogous to the implementation in SPM12
 """
@@ -62,7 +91,7 @@ mutable struct JansenRitSPM12 <: NeuralMassBlox
         p = paramscoping(τ=τ, r=r)
         τ, r = p
 
-        sts    = @variables x(t)=1.0 [output=true] y(t)=1.0 jcn(t)=0.0 [input=true]
+        sts    = @variables x(t)=0.0 [output=true] y(t)=0.0 jcn(t)=0.0 [input=true]
         eqs    = [D(x) ~ y,                                # TODO: shouldn't -2*x/τ be in this line? However, see Friston2012 and SPM12 implementation.
                   D(y) ~ (-2*y - x/τ + jcn)/τ]
 

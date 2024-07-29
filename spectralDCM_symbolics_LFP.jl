@@ -39,14 +39,6 @@ max_iter = 128                       # maximum number of iterations
 # y_csd = vars["csd"]
 ### Define priors and initial conditions ###
 x = vars["x"];                       # initial condition of dynamic variabls
-# Adj = vars["pE"]["A"];                 # initial values of connectivity matrix
-# θΣ = vars["pC"];                     # prior covariance of parameter values 
-# λμ = vec(vars["hE"]);                # prior mean of hyperparameters
-# Πλ_p = vars["ihC"];                  # prior precision matrix of hyperparameters
-# if typeof(Πλ_p) <: Number            # typically Πλ_p is a matrix, however, if only one hyperparameter is used it will turn out to be a scalar -> transform that to matrix
-#     Πλ_p *= ones(1,1)
-# end
-
 
 ########## assemble the model ##########
 g = MetaDiGraph()
@@ -85,15 +77,15 @@ for i in 1:nd
         k += 1
         # forward connection matrix
         add_edge!(g, regions[i], regions[j], :weightmatrix,
-                [0 exp(a_sp_ss[k]) 0 0;
+                [0 exp(a_sp_ss[k]) 0 0;            # connection from sp to ss
                 0 0 0 0;
                 0 0 0 0;
-                0 exp(a_sp_dp[k])/2 0 0] * 200)
+                0 exp(a_sp_dp[k])/2 0 0] * 200)    # connection from sp to dp
         # backward connection matrix
         add_edge!(g, regions[j], regions[i], :weightmatrix,
                 [0 0 0 0;
-                0 0 0 -exp(a_dp_sp[k]);
-                0 0 0 -exp(a_dp_ii[k])/2;
+                0 0 0 -exp(a_dp_sp[k]);            # connection from dp to sp
+                0 0 0 -exp(a_dp_ii[k])/2;          # connection from dp to ii
                 0 0 0 0] * 200)
     end
 end
@@ -103,7 +95,7 @@ fullmodel = structural_simplify(fullmodel, split=false)
 
 # attribute initial conditions to states
 sts, idx_sts = get_dynamic_states(fullmodel)
-idx_u = get_idx_tagged_vars(fullmodel, "ext_input")         # get index of external input state
+idx_u = get_idx_tagged_vars(fullmodel, "ext_input")                # get index of external input state
 idx_measurement = get_eqidx_tagged_vars(fullmodel, "measurement")  # get index of equation of bold state
 initcond = OrderedDict(sts .=> 0.0)
 rnames = []
@@ -116,10 +108,11 @@ for (i, r) in enumerate(rnames)
 end
 
 modelparam = OrderedDict()
-for par in tunable_parameters(fullmodel)
-    modelparam[par] = Symbolics.getdefaultval(par)
+np = sum(tunable_parameters(fullmodel); init=0) do par
+    val = Symbolics.getdefaultval(par)
+    modelparam[par] = val
+    length(val)
 end
-np = length(modelparam)
 indices = Dict(:dspars => collect(1:np))
 # Noise parameter mean
 modelparam[:lnα] = zeros(Float64, 2, nd);           # intrinsic fluctuations, ln(α) as in equation 2 of Friston et al. 2014 
@@ -145,7 +138,7 @@ paramvariance[:lnγ] = ones(Float64, nd)./128.0;
 for (k, v) in paramvariance
     if occursin("a_", string(k))
         paramvariance[k] = 1/16.0
-    elseif "r" == string(k)
+    elseif "lnr" == string(k)
         paramvariance[k] = 1/64.0;
     elseif occursin("lnτ", string(k))
         paramvariance[k] = 1/32.0;
@@ -164,15 +157,21 @@ hyperpriors = Dict(:Πλ_pr => hype["ihC"],            # prior metaparameter pre
 csdsetup = Dict(:p => 8, :freq => vec(vars["Hz"]), :dt => vars["dt"]);
 
 (state, setup) = setup_sDCM(data, fullmodel, initcond, csdsetup, priors, hyperpriors, indices, "LFP");
-for iter in 1:128
-    state.iter = iter
-    run_sDCM_iteration!(state, setup)
-    print("iteration: ", iter, " - F:", state.F[end] - state.F[2], " - dF predicted:", state.dF[end], "\n")
-    if iter >= 4
-        criterion = state.dF[end-3:end] .< setup.tolerance
-        if all(criterion)
-            print("convergence\n")
-            break
+# HACK: on machines with very small amounts of RAM, Julia can run out of stack space while compiling the code called in this loop
+# this should be rewritten to abuse the compiler less, but for now, an easy solution is just to run it with more allocated stack space.
+with_stack(f, n) = fetch(schedule(Task(f,n)))
+
+with_stack(5_000_000) do  # 5MB of stack space
+    for iter in 1:128
+        state.iter = iter
+        run_sDCM_iteration!(state, setup)
+        print("iteration: ", iter, " - F:", state.F[end] - state.F[2], " - dF predicted:", state.dF[end], "\n")
+        if iter >= 4
+            criterion = state.dF[end-3:end] .< setup.tolerance
+            if all(criterion)
+                print("convergence\n")
+                break
+            end
         end
     end
 end
