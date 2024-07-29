@@ -40,7 +40,7 @@ mutable struct ExternalInput <: StimulusBlox
     output::Num
     odesystem::ODESystem
     function ExternalInput(;name, I=1.0, namespace=nothing)
-        sts = @variables u(t) [irreducible=true, description="ext_input"]
+        sts = @variables u(t)=0.0 [irreducible=true, description="ext_input"]
         eqs = [u ~ I]
         odesys = System(eqs, t, sts, []; name=name)
         new(namespace, sts[1], odesys)
@@ -68,17 +68,16 @@ mutable struct OUBlox <: StimulusBlox
     function OUBlox(;name, namespace=nothing, μ=0.0, σ=1.0, τ=1.0)
         p = paramscoping(μ=μ, τ=τ, σ=σ)
         μ, τ, σ = p
-        @variables x(t)=1.0 [output=true]
-        @brownian v
+        sts = @variables x(t)=0.0 [output=true]
+        @brownian w
 
-        eqs = [D(x) ~ -(x-μ)/τ + sqrt(2/τ)*σ*v]
+        eqs = [D(x) ~ -(x-μ)/τ + sqrt(2/τ)*σ*w]
         sys = System(eqs, t, name=name)
-        new(namespace, sys.x, sys)
+        new(namespace, sts[1], sys)
     end
 end
 
 # Canonical micro-circuit model
-
 """
 Jansen-Rit model block for canonical micro circuit, analogous to the implementation in SPM12
 """
@@ -92,7 +91,7 @@ mutable struct JansenRitSPM12 <: NeuralMassBlox
         p = paramscoping(τ=τ, r=r)
         τ, r = p
 
-        sts    = @variables x(t)=1.0 [output=true] y(t)=1.0 jcn(t)=0.0 [input=true]
+        sts    = @variables x(t)=0.0 [output=true] y(t)=0.0 jcn(t)=0.0 [input=true]
         eqs    = [D(x) ~ y,                                # TODO: shouldn't -2*x/τ be in this line? However, see Friston2012 and SPM12 implementation.
                   D(y) ~ (-2*y - x/τ + jcn)/τ]
 
