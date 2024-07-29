@@ -201,10 +201,6 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
     p = csdsetup[:p];                # order of MAR
     mar = mar_ml(Matrix(data), p);   # compute MAR from time series y and model order p
     y_csd = mar2csd(mar, ω, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
-    if modality == "LFP"
-        vars = matread("speedandaccuracy/matlab_cmc.mat");
-        y_csd = vars["csd"]
-    end
 
     jac_fg = generate_jacobian(model, expression = Val{false})[1]   # compute symbolic jacobian.
 
