@@ -4,7 +4,7 @@ measurement_symbolic.jl
 Models of fMRI and LFP signals.
 
 BalloonModel : computes hemodynamic responses and bold signal
-leadfield    : computes LFP lead fields (TODO: make symbolic)
+leadfield    : computes LFP lead fields
 """
 
 

@@ -539,6 +539,237 @@ function unvecparam(vals, param::OrderedDict{Any,Any})
 end
 
 
+"""
+    function setup_sDCM(data, stateevolutionmodel, initcond, csdsetup, priors, hyperpriors, indices)
+
+    Interface function to performs variational inference to fit model parameters to empirical cross spectral density.
+    The current implementation provides a Variational Laplace fit (see function above `variationalbayes`).
+
+    Arguments:
+    - `data`        : dataframe with column names corresponding to the regions of measurement.
+    - `model`       : MTK model, including state evolution and measurement.
+    - `initcond`    : dictionary of initial conditions, numerical values for all states
+    - `csdsetup`    : dictionary of parameters required for the computation of the cross spectral density
+    -- `dt`         : sampling interval
+    -- `freq`       : frequencies at which to evaluate the CSD
+    -- `p`          : order parameter of the multivariate autoregression model
+    - `priors`      : dataframe of parameters with the following columns:
+    -- `name`       : corresponds to MTK model name
+    -- `mean`       : corresponds to prior mean value
+    -- `variance`   : corresponds to the prior variances
+    - `hyperpriors` : dataframe of parameters with the following columns:
+    -- `Πλ_pr`      : prior precision matrix for λ hyperparameter(s)
+    -- `μλ_pr`      : prior mean(s) for λ hyperparameter(s)
+    - `indices`  : indices to separate model parameters from other parameters. Needed for the computation of AD gradient.
+"""
+function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, indices, modality)
+    # compute cross-spectral density
+    dt = csdsetup.dt;              # order of MAR. Hard-coded in SPM12 with this value. We will use the same for now.
+    freq = csdsetup.freq;                # frequencies at which the CSD is evaluated
+    mar_order = csdsetup.mar_order;        # order of MAR
+    _, vars = get_eqidx_tagged_vars(model, "measurement")
+    data = Matrix(data[:, Symbol.(vars)])  # make sure the column order is consistent with the ordering of variables of the model that represent the measurements
+    mar = mar_ml(data, mar_order);         # compute MAR from time series y and model order p
+    y_csd = mar2csd(mar, freq, dt^-1);        # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
+    jac_fg = generate_jacobian(model, expression = Val{false})[1]   # compute symbolic jacobian.
+
+    statevals = [v for v in values(initcond)]
+    derivatives = par -> jac_fg(statevals, addnontunableparams(par, model), t)
+
+    μθ_pr = vecparam(OrderedDict(priors.name .=> priors.mean))            # note: μθ_po is posterior and μθ_pr is prior
+    Σθ_pr = diagm(vecparam(OrderedDict(priors.name .=> priors.variance)))
+
+    ### Collect prior means and covariances ###
+    if haskey(hyperpriors, :Q)
+        Q = hyperpriors[:Q];
+    else
+        Q = csd_Q(y_csd);                 # compute functional connectivity prior Q. See Friston etal. 2007 Appendix A
+    end
+    nq = 1                            # TODO: this is hard-coded, need to make this compliant with csd_Q
+    nh = size(Q, 3)                   # number of precision components (this is the same as above, but may differ)
+
+    f = params -> csd_mtf(freq, mar_order, derivatives, params, indices, modality)
+
+    np = length(μθ_pr)     # number of parameters
+    ny = length(y_csd)     # total number of response variables
+
+    # variational laplace state variables
+    vlstate = VLState(
+        0,                                   # iter
+        -4,                                  # log ascent rate
+        [-Inf],                              # free energy
+        Float64[],                           # delta free energy
+        hyperpriors[:μλ_pr],                 # metaparameter, initial condition. TODO: why are we not just using the prior mean?
+        zeros(np),                           # parameter estimation error ϵ_θ
+        [zeros(np), hyperpriors[:μλ_pr]],    # memorize reset state
+        μθ_pr,                               # parameter posterior mean
+        Σθ_pr,                               # parameter posterior covariance
+        zeros(np),
+        zeros(np, np)
+    )
+# Main.foo[] = Q, f, y_csd, [np, ny, nq, nh], [μθ_pr, hyperpriors[:μλ_pr]], [inv(Σθ_pr), hyperpriors[:Πλ_pr]]
+    # variational laplace setup
+    vlsetup = VLSetup(
+        f,                                    # function that computes the cross-spectral density at fixed point 'initcond'
+        y_csd,                                # empirical cross-spectral density
+        1e-1,                                 # tolerance
+        [np, ny, nq, nh],                     # number of parameters, number of data points, number of Qs, number of hyperparameters
+        [μθ_pr, hyperpriors[:μλ_pr]],         # parameter and hyperparameter prior mean
+        [inv(Σθ_pr), hyperpriors[:Πλ_pr]],    # parameter and hyperparameter prior precision matrices
+        Q                                     # components of data precision matrix
+    )
+    return (vlstate, vlsetup)
+end
+
+function run_sDCM_iteration!(state::VLState, setup::VLSetup)
+    (;μθ_po, λ, v, ϵ_θ, dFdθ, dFdθθ) = state
+
+    f = setup.model_at_x0
+    y = setup.y_csd              # cross-spectral density
+    (np, ny, nq, nh) = setup.systemnums
+    (μθ_pr, μλ_pr) = setup.systemvecs
+    (Πθ_pr, Πλ_pr) = setup.systemmatrices
+    Q = setup.Q
+
+    dfdp = jacobian(f, μθ_po)
+
+    norm_dfdp = matlab_norm(dfdp, Inf);
+    revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
+
+    if revert && state.iter > 1
+        for i = 1:4
+            # reset expansion point and increase regularization
+            v = min(v - 2, -4);
+            t = exp(v - logdet(dFdθθ)/np)
+
+            # E-Step: update
+            if t > exp(16)
+                ϵ_θ = ϵ_θ - dFdθθ \ dFdθ    # -inv(dfdx)*f
+            else
+                ϵ_θ = ϵ_θ + expv(t, dFdθθ, dFdθθ \ dFdθ) - dFdθθ \ dFdθ   # (expm(dfdx*t) - I)*inv(dfdx)*f
+            end
+
+            μθ_po = μθ_pr + ϵ_θ
+
+            dfdp = jacobian(f, μθ_po)
+
+            # check for stability
+            norm_dfdp = matlab_norm(dfdp, Inf);
+            revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
+
+            # break
+            if ~revert
+                break
+            end
+        end
+    end
+
+    ϵ = reshape(y - f(μθ_po), ny)                   # error
+    J = - dfdp   # Jacobian, unclear why we have a minus sign. Helmut: comes from deriving a Gaussian. 
+
+    ## M-step: Fisher scoring scheme to find h = max{F(p,h)} // comment from MATLAB code
+    P = zeros(eltype(J), size(Q))
+    PΣ = zeros(eltype(J), size(Q))
+    JPJ = zeros(real(eltype(J)), size(J, 2), size(J, 2), size(Q, 3))
+    dFdλ = zeros(eltype(J), nh)
+    dFdλλ = zeros(real(eltype(J)), nh, nh)
+    local iΣ, Σλ_po, Σθ_po, ϵ_λ
+    for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
+        iΣ = zeros(eltype(J), ny, ny)
+        for i = 1:nh
+            iΣ .+= Q[:, :, i] * exp(λ[i])
+        end
+
+        Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why is this okay?
+        Σθ_po = inv(Pp + Πθ_pr)
+
+        for i = 1:nh
+            P[:,:,i] = Q[:,:,i]*exp(λ[i])
+            PΣ[:,:,i] = iΣ \ P[:,:,i]
+            JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above)
+        end
+        for i = 1:nh
+            dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ_po * JPJ[:,:,i]))/2
+            for j = i:nh
+                dFdλλ[i, j] = -real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2
+                dFdλλ[j, i] = dFdλλ[i, j]
+            end
+        end
+
+        ϵ_λ = λ - μλ_pr
+        dFdλ = dFdλ - Πλ_pr*ϵ_λ
+        dFdλλ = dFdλλ - Πλ_pr
+        Σλ_po = inv(-dFdλλ)
+
+        t = exp(4 - spm_logdet(dFdλλ)/length(λ))
+        # E-Step: update
+        if t > exp(16)
+            dλ = -real(dFdλλ \ dFdλ)
+        else
+            idFdλλ = inv(dFdλλ)
+            dλ = real(exponential!(t * dFdλλ) * idFdλλ*dFdλ - idFdλλ*dFdλ)   # (expm(dfdx*t) - I)*inv(dfdx)*f ~~~ could also be done with expv but doesn't work with Dual.
+        end
+
+        dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
+        λ = λ + dλ
+
+        dF = dot(dFdλ, dλ)
+
+        # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
+        # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
+        # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
+        if real(dF) < 1e-2
+            break
+        end
+    end
+
+    ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
+    L = zeros(real(eltype(iΣ)), 3)
+    L[1] = (real(logdet(iΣ))*nq - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
+    L[2] = (logdet(Πθ_pr * Σθ_po) - dot(ϵ_θ, Πθ_pr, ϵ_θ))/2
+    L[3] = (logdet(Πλ_pr * Σλ_po) - dot(ϵ_λ, Πλ_pr, ϵ_λ))/2
+    F = sum(L)
+
+    if F > state.F[end] || state.iter < 3
+        # accept current state
+        state.reset_state = [ϵ_θ, λ]
+        append!(state.F, F)
+        state.Σθ_po = Σθ_po
+        # Conditional update of gradients and curvature
+        dFdθ  = -real(J' * iΣ * ϵ) - Πθ_pr * ϵ_θ    # check sign
+        dFdθθ = -real(J' * iΣ * J) - Πθ_pr
+        # decrease regularization
+        v = min(v + 1/2, 4);
+    else
+        # reset expansion point
+        ϵ_θ, λ = state.reset_state
+        # and increase regularization
+        v = min(v - 2, -4);
+    end
+
+    # E-Step: update
+    t = exp(v - spm_logdet(dFdθθ)/np)
+    if t > exp(16)
+        dθ = - inv(dFdθθ) * dFdθ     # -inv(dfdx)*f
+    else
+        dθ = exponential!(t * dFdθθ) * inv(dFdθθ) * dFdθ - inv(dFdθθ) * dFdθ     # (expm(dfdx*t) - I)*inv(dfdx)*f
+    end
+
+    ϵ_θ += dθ
+    state.μθ_po = μθ_pr + ϵ_θ
+    dF = dot(dFdθ, dθ);
+
+    state.v = v
+    state.ϵ_θ = ϵ_θ
+    state.λ = λ
+    state.dFdθθ = dFdθθ
+    state.dFdθ = dFdθ
+    append!(state.dF, dF)
+
+    return state
+end
+
+
 function variationalbayes(sts, y, derivatives, w, V, p, param, priors, niter)    # relates to spm_nlsi_GN.m
     # extract priors
     Πθ_pr = priors[:Πθ_pr]
