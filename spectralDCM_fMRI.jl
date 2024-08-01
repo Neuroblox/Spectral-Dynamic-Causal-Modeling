@@ -8,7 +8,6 @@ using ForwardDiff
 using BenchmarkTools
 using OrderedCollections
 using SparseDiffTools
-Random.seed!(101);
 
 include("src/models/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
 include("src/VariationalBayes_spm12.jl")             # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
