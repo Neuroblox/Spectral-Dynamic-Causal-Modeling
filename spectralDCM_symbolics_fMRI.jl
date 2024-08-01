@@ -20,8 +20,8 @@ TODO:
 include("src/utils/typedefinitions.jl")
 include("src/VariationalBayes_MTKAD.jl")
 include("src/utils/mar.jl")
-include("src/models/neuraldynamics_symbolic.jl")
-include("src/models/measurement_symbolic.jl")
+include("src/models/neuraldynamics_MTK.jl")
+include("src/models/measurement_MTK.jl")
 include("src/utils/MTK_utilities.jl")
 
 ### Load data ###
