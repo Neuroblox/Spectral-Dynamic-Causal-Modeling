@@ -78,11 +78,19 @@ prob = SDEProblem(fullmodel, [], tspan)
 dt = 2.0
 sol = solve(prob, saveat=dt);
 
-# plot simulation results
+### plot simulation results ###
 idx_m = get_idx_tagged_vars(fullmodel, "measurement")    # get index of measurements
 plot(sol, idxs=idx_m)
 
-### Load data ###
+solm = Matrix(sol)'
+data = solm[:, idx_m]
+p = 8;
+mar = mar_ml(data, p)
+ns = size(data, 1)
+freq = range(min(128, ns*dt)^-1, max(8, 2*dt)^-1, 32)
+csd = mar2csd(mar, freq, dt^-1)
+plot(freq, real.(csd[:, 2, 2]))
+
 
 max_iter = 128                       # maximum number of iterations
 
