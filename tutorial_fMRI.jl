@@ -8,6 +8,7 @@ using OrderedCollections
 using MetaGraphs
 using Graphs
 using ModelingToolkit
+using DifferentialEquations
 using DataFrames
 using MAT
 
@@ -20,8 +21,8 @@ TODO:
 include("src/utils/typedefinitions.jl")
 include("src/VariationalBayes_MTKAD.jl")
 include("src/utils/mar.jl")
-include("src/models/neuraldynamics_symbolic.jl")
-include("src/models/measurement_symbolic.jl")
+include("src/models/neuraldynamics_MTK.jl")
+include("src/models/measurement_MTK.jl")
 include("src/utils/MTK_utilities.jl")
 
 
@@ -38,7 +39,8 @@ g = MetaDiGraph()
 regions = Dict()   # this dictionary is used to keep track of the neural mass block index to more easily connect to other blocks
 
 # decay parameter for hemodynamics lnκ and ratio of intra- to extra-vascular components lnϵ is shared across brain regions 
-@parameters lnκ=0.0 lnϵ=0.0 C=1.0
+@parameters lnκ=0.0 lnϵ=0.0 
+@parameters C=1/16   # note that C=1/16 is taken from SPM12 and stabilizes the balloon model simulation. Alternatively the noise or the weight of the edge connecting neuronal activity and balloon model can be reduced.
 for i = 1:nr
     region = LinearNeuralMass(;name=Symbol("r$(i)₊lm"))
     add_blox!(g, region)
@@ -54,11 +56,13 @@ for i = 1:nr
     add_edge!(g, regions[i], nv(g), Dict(:weight => 1.0))
 end
 
+A_num = randn(nr, nr)
+A_num -= diagm(map(a -> sum(abs, a), eachrow(A_num)))    # ensure diagonal dominance of matrix
 # add symbolic weights
-@parameters A[1:length(vars["pE"]["A"])] = vec(vars["pE"]["A"]) [tunable = true]
-for (i, idx) in enumerate(CartesianIndices(vars["pE"]["A"]))
+@parameters A[1:nr^2] = vec(A_num) [tunable = true]
+for (i, idx) in enumerate(CartesianIndices(A_num))
     if idx[1] == idx[2]
-        add_edge!(g, regions[idx[1]], regions[idx[2]], :weight, -exp(A[i])/2)  # treatement of diagonal elements in SPM12
+        add_edge!(g, regions[idx[1]], regions[idx[2]], :weight, A[i])  # -exp(A[i])/2: treatement of diagonal elements in SPM12 to make diagonal dominance (see Gershgorin Theorem) more likely but it is not guaranteed
     else
         add_edge!(g, regions[idx[2]], regions[idx[1]], :weight, A[i])
     end
@@ -68,11 +72,18 @@ end
 @named fullmodel = system_from_graph(g)
 fullmodel = structural_simplify(fullmodel, split=false)
 
+# simulate model
+tspan = (0.0, 512.0)
+prob = SDEProblem(fullmodel, [], tspan)
+dt = 2.0
+sol = solve(prob, saveat=dt);
 
+# plot simulation results
+idx_m = get_idx_tagged_vars(fullmodel, "measurement")    # get index of measurements
+plot(sol, idxs=idx_m)
 
 ### Load data ###
-x = vars["x"];                       # initial condition of dynamic variabls
-nr = size(data, 2);                  # number of regions
+
 max_iter = 128                       # maximum number of iterations
 
 ########## assemble the model ##########
