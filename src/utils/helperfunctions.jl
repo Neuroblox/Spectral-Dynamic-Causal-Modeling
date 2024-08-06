@@ -21,6 +21,22 @@ function vecparam(param::OrderedDict)
     return flatparam
 end
 
+function unvecparam(vals, param::OrderedDict)
+    iter = 1
+    paramnewvals = copy(param)
+    for (k, v) in param
+        if (typeof(v) <: Array)
+            paramnewvals[k] = vals[iter:iter+length(v)-1]
+            iter += length(v)
+        else
+            paramnewvals[k] = vals[iter]
+            iter += 1
+        end
+    end
+    return paramnewvals
+end
+
+
 """
     function matlab_norm(A, p)
 
