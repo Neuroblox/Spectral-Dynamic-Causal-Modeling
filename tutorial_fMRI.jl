@@ -206,7 +206,7 @@ csdsetup = Dict(:p => p, :freq => freq, :dt => dt);
 # this should be rewritten to abuse the compiler less, but for now, an easy solution is just to run it with more allocated stack space.
 with_stack(f, n) = fetch(schedule(Task(f,n)))
 
-# with_stack(5_000_000) do  # 5MB of stack space
+with_stack(5_000_000) do  # 5MB of stack space
     for iter in 1:max_iter
         state.iter = iter
         run_sDCM_iteration!(state, setup)
@@ -219,7 +219,7 @@ with_stack(f, n) = fetch(schedule(Task(f,n)))
             end
         end
     end
-# end
+end
 
 # plot results
 using CairoMakie

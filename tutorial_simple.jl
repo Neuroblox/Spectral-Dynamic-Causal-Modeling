@@ -63,7 +63,7 @@ simmodel = structural_simplify(simmodel, split=false)
 # simulate model
 tspan = (0.0, 500.0)
 prob = SDEProblem(simmodel, [], tspan)
-dt = 0.1
+dt = 1
 sol = solve(prob, saveat=dt);
 
 ### plot simulation results ###
@@ -75,10 +75,10 @@ Plots.plot(sol, idxs=idx_m)
 # estimate and plot cross-spectrum
 solm = Matrix(sol)'
 data = solm[:, idx_m]
-p = 100;
+p = 8;
 mar = mar_ml(data, p)
 ns = size(data, 1)
-freq = 0.1:0.1:10 #range(min(128, ns*dt)^-1, max(8, 2*dt)^-1, 32)
+freq = range(min(128, ns*dt)^-1, max(8, 2*dt)^-1, 32)
 csd = mar2csd(mar, freq, dt^-1)
 Plots.plot(freq, real.(csd[:, 2, 2]))
 
@@ -191,7 +191,7 @@ csdsetup = Dict(:p => p, :freq => freq, :dt => dt);
 # this should be rewritten to abuse the compiler less, but for now, an easy solution is just to run it with more allocated stack space.
 with_stack(f, n) = fetch(schedule(Task(f,n)))
 
-# with_stack(5_000_000) do  # 5MB of stack space
+with_stack(5_000_000) do  # 5MB of stack space
     for iter in 1:max_iter
         state.iter = iter
         run_sDCM_iteration!(state, setup)
@@ -204,7 +204,7 @@ with_stack(f, n) = fetch(schedule(Task(f,n)))
             end
         end
     end
-# end
+end
 
 # plot results
 
