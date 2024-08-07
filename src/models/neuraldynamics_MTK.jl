@@ -52,7 +52,7 @@ Ornstein-Uhlenbeck process Blox
 
 variables:
     x(t):  value
-    jcn:   input 
+    jcn:   input
 parameters:
     τ:      relaxation time
 	μ:      average value
