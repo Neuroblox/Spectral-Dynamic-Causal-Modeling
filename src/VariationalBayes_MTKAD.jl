@@ -218,7 +218,7 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
     end
     nq = 1                            # TODO: this is hard-coded, need to make this compliant with csd_Q
     nh = size(Q, 3)                   # number of precision components (this is the same as above, but may differ)
-
+    nr = length(params_idx[:lnγ])     # region specific noise parameter can be used to get the number of regions
     f = params -> csd_mtf(ω, p, derivatives, params, params_idx, modality)
 
     np = length(μθ_pr)     # number of parameters
@@ -244,7 +244,7 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
         f,                    # function that computes the cross-spectral density at fixed point 'initcond'
         y_csd,                # empirical cross-spectral density
         1e-1,                 # tolerance
-        [np, ny, nq, nh],     # number of parameters, number of data points, number of Qs, number of hyperparameters
+        [nr, np, ny, nq, nh],     # number of parameters, number of data points, number of Qs, number of hyperparameters
         [μθ_pr, hyperpriors[:μλ_pr]],          # parameter and hyperparameter prior mean
         [inv(Σθ_pr), hyperpriors[:Πλ_pr]],     # parameter and hyperparameter prior precision matrices
         Q                                      # components of data precision matrix
