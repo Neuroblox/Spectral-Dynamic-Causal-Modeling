@@ -244,7 +244,7 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
         f,                    # function that computes the cross-spectral density at fixed point 'initcond'
         y_csd,                # empirical cross-spectral density
         1e-1,                 # tolerance
-        [nr, np, ny, nq, nh],     # number of parameters, number of data points, number of Qs, number of hyperparameters
+        [np, ny, nq, nh],     # number of parameters, number of data points, number of Qs, number of hyperparameters
         [μθ_pr, hyperpriors[:μλ_pr]],          # parameter and hyperparameter prior mean
         [inv(Σθ_pr), hyperpriors[:Πλ_pr]],     # parameter and hyperparameter prior precision matrices
         Q                                      # components of data precision matrix
@@ -324,7 +324,7 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
     P = zeros(eltype(J), size(Q))
     PΣ = zeros(eltype(J), size(Q))
     JPJ = zeros(real(eltype(J)), size(J, 2), size(J, 2), size(Q, 3))
-    dFdλ = zeros(eltype(J), nh)
+    dFdλ = zeros(real(eltype(J)), nh)
     dFdλλ = zeros(real(eltype(J)), nh, nh)
     local iΣ, Σλ_po, Σθ_po, ϵ_λ
     for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
@@ -335,20 +335,25 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
 
         Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why is this okay?
         Σθ_po = inv(Pp + Πθ_pr)
-
-        for i = 1:nh
-            P[:,:,i] = Q[:,:,i]*exp(λ[i])
-            PΣ[:,:,i] = iΣ \ P[:,:,i]
-            JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above)
-        end
-        for i = 1:nh
-            dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ_po * JPJ[:,:,i]))/2
-            for j = i:nh
-                dFdλλ[i, j] = -real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2
-                dFdλλ[j, i] = dFdλλ[i, j]
+        if nh > 1
+            for i = 1:nh
+                P[:,:,i] = Q[:,:,i]*exp(λ[i])
+                PΣ[:,:,i] = iΣ \ P[:,:,i]
+                JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above)
             end
+            for i = 1:nh
+                dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ_po * JPJ[:,:,i]))/2
+                for j = i:nh
+                    dFdλλ[i, j] = -real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2
+                    dFdλλ[j, i] = dFdλλ[i, j]
+                end
+            end
+        else
+            dFdλ[1, 1] = ny/2 - real(ϵ'*iΣ*ϵ)/2 - tr(Σθ_po * Pp)/2;
+            dFdλλ[1, 1] = - ny/2;
         end
 
+        dFdλλ = dFdλλ + diagm(dFdλ);
         ϵ_λ = λ - μλ_pr
         dFdλ = dFdλ - Πλ_pr*ϵ_λ
         dFdλλ = dFdλλ - Πλ_pr
