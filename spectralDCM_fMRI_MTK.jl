@@ -25,7 +25,7 @@ include("src/models/measurement_MTK.jl")
 include("src/utils/MTK_utilities.jl")
 
 ### Load data ###
-vars = matread("../Spectral-DCM/speedandaccuracy/matlab0.01_3regions.mat");
+vars = matread("./speedandaccuracy/spm12_demo.mat");
 data = vars["data"];
 x = vars["x"];                       # initial condition of dynamic variabls
 nr = size(data, 2);                  # number of regions
@@ -53,7 +53,12 @@ for ii = 1:nr
 end
 
 # add symbolic weights
-@parameters A[1:length(vars["pE"]["A"])] = vec(vars["pE"]["A"]) [tunable = true]
+A = []
+for (i, a) in enumerate(vec(vars["pE"]["A"]))
+    symb = Symbol("A$(i)")
+    push!(A, only(@parameters $symb = a))
+end
+
 for (i, idx) in enumerate(CartesianIndices(vars["pE"]["A"]))
     if idx[1] == idx[2]
         add_edge!(g, regions[idx[1]], regions[idx[2]], :weight, -exp(A[i])/2)  # treatement of diagonal elements in SPM12
@@ -64,6 +69,11 @@ end
 
 # compose model
 @named fullmodel = system_from_graph(g)
+untunelist = Dict()
+for (i, v) in enumerate(diag(vars["pC"])[1:nr^2])
+    untunelist[A[i]] = v == 0 ? false : true
+end
+fullmodel = changetune(fullmodel, untunelist)
 fullmodel = structural_simplify(fullmodel, split=false)
 
 # attribute initial conditions to states
@@ -110,7 +120,8 @@ paramvariance[:lnβ] = ones(Float64, length(modelparam[:lnβ]))./64.0;
 paramvariance[:lnγ] = ones(Float64, nr)./64.0;
 for (k, v) in paramvariance
     if occursin("A", string(k))
-        paramvariance[k] = repeat([vars["pC"][1, 1]], length(v))
+        i = parse(Int, string(k)[2])
+        paramvariance[k] = repeat([vars["pC"][i, i]], length(v))
     elseif occursin("κ", string(k))
         paramvariance[k] = ones(length(v))./256.0;
     elseif occursin("ϵ", string(k))
@@ -140,7 +151,7 @@ with_stack(5_000_000) do  # 5MB of stack space
         if iter >= 4
             criterion = state.dF[end-3:end] .< setup.tolerance
             if all(criterion)
-                print("convergence\n")
+                print("convergence, with free energy: ", state.F[end])
                 break
             end
         end

@@ -404,6 +404,14 @@ function addnontunableparams(paramlist, sys)
     return completeparamlist
 end
 
+function changetune(model, parlist)
+    parstochange = keys(parlist)
+    p_new = map(parameters(model)) do p
+        p in parstochange ? setmetadata(p, ModelingToolkit.VariableTunable, parlist[p]) : p
+    end
+    System(equations(model), ModelingToolkit.get_iv(model), unknowns(model), p_new; name=model.name)
+end
+
 ### Graph Utilities ###
 
 function add_blox!(g::MetaDiGraph,blox)
