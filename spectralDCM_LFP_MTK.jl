@@ -62,10 +62,10 @@ for ii = 1:nd
 end
 
 nl = Int((nd^2-nd)/2)   # number of links unidirectional
-@parameters a_sp_ss[1:nl] = repeat([0.0], nl) # forward connection parameter sp -> ss
-@parameters a_sp_dp[1:nl] = repeat([0.0], nl) # forward connection parameter sp -> dp
-@parameters a_dp_sp[1:nl] = repeat([0.0], nl) # backward connection parameter dp -> sp
-@parameters a_dp_ii[1:nl] = repeat([0.0], nl) # backward connection parameters dp -> ii
+@parameters a_sp_ss[1:nl] = repeat([1/2.0], nl) # forward connection parameter sp -> ss: sim value 1/2
+@parameters a_sp_dp[1:nl] = repeat([3/2.0], nl) # forward connection parameter sp -> dp: sim value 3/2
+@parameters a_dp_sp[1:nl] = repeat([1/16.0], nl)  # backward connection parameter dp -> sp: sim value 1/16
+@parameters a_dp_ii[1:nl] = repeat([3.0], nl) # backward connection parameters dp -> ii: sim value 3
 
 k = 0
 for i in 1:nd
