@@ -14,7 +14,8 @@ include("src/VariationalBayes_spm12.jl")             # this can be switched betw
 include("src/utils/mar.jl")                       # multivariate auto-regressive model functions
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("../Spectral-DCM/speedandaccuracy/matlab0.01_3regions.mat");
+vars = matread("./speedandaccuracy/spm12_demo.mat");
+
 y = vars["data"];
 nd = size(y, 2);
 dt = vars["dt"];
@@ -63,7 +64,7 @@ priors = Dict(:μ => OrderedDict{Any, Any}(
               :Σ => Dict(
                          :Πθ_pr => inv(θΣ),           # prior model parameter precision
                          :Πλ_pr => Πλ_p,              # prior metaparameter precision
-                         :μλ_pr => [vars["hE"]],   # prior metaparameter mean
+                         :μλ_pr => [vars["hE"]],      # prior metaparameter mean
                          :Q => Q                      # decomposition of model parameter covariance
                         )
              );
