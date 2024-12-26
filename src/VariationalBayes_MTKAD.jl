@@ -166,6 +166,7 @@ end
         y_part = (p->p.partials).(real(y)) + (p->p.partials).(imag(y))*im
         y = map((x1, x2) -> Dual{tagtype(real(y)[1]), ComplexF64, length(x2)}(x1, Partials(Tuple(x2))), y_vals, y_part)
     end
+
     return y
 end
 
@@ -327,7 +328,7 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
     dFdλ = zeros(real(eltype(J)), nh)
     dFdλλ = zeros(real(eltype(J)), nh, nh)
     local iΣ, Σλ_po, Σθ_po, ϵ_λ
-    for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
+    for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM code.
         iΣ = zeros(eltype(J), ny, ny)
         for i = 1:nh
             iΣ .+= Q[:, :, i] * exp(λ[i])
@@ -338,7 +339,7 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
         if nh > 1
             for i = 1:nh
                 P[:,:,i] = Q[:,:,i]*exp(λ[i])
-                PΣ[:,:,i] = iΣ \ P[:,:,i]
+                PΣ[:,:,i] = real(iΣ \ P[:,:,i])
                 JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above)
             end
             for i = 1:nh
@@ -373,9 +374,6 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
 
         dF = dot(dFdλ, dλ)
 
-        # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
-        # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
-        # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
         if real(dF) < 1e-2
             break
         end
