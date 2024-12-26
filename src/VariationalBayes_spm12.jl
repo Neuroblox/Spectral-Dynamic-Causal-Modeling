@@ -891,7 +891,6 @@ function variationalbayes(x, y, w, V, p, priors, niter)    # relates to spm_nlsi
             dF = dot(dFdλ, dλ)
 
             if real(dF) < 1e-2
-                error()
                 break
             end
         end
