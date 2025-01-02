@@ -17,7 +17,6 @@ csd_approx       : approximates CSD based on transfer functions
 csd_fmri_mtf     :
 diff             : computes Jacobian of model
 csd_Q            : computes precision component prior (which erroneously is not used in the SPM12 code for fMRI signals, it is used for other modalities)
-matlab_norm      : computes norm consistent with MATLAB's norm function (Julia's is different, at lest for matrices. Haven't tested vectors)
 spm_logdet       : mimick SPM12's way to compute the logarithm of the determinant. Sometimes Julia's logdet won't work.
 variationalbayes : main routine that computes the variational Bayes estimate of model parameters
 """
@@ -287,7 +286,7 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
     Q = setup.Q
 
     dfdp = jacobian(f, μθ_po)
-    norm_dfdp = matlab_norm(dfdp, Inf);
+    norm_dfdp = opnorm(dfdp, Inf);
     revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
     if revert && state.iter > 1
@@ -308,7 +307,7 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
             dfdp = jacobian(f, μθ_po)
 
             # check for stability
-            norm_dfdp = matlab_norm(dfdp, Inf);
+            norm_dfdp = opnorm(dfdp, Inf);
             revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
             # break
@@ -408,7 +407,7 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
     if t > exp(16)
         dθ = - inv(dFdθθ) * dFdθ     # -inv(dfdx)*f
     else
-        dθ = exponential!(t * dFdθθ) * inv(dFdθθ) * dFdθ - inv(dFdθθ) * dFdθ     # (expm(dfdx*t) - I)*inv(dfdx)*f
+        dθ = exp(t * dFdθθ) * inv(dFdθθ) * dFdθ - inv(dFdθθ) * dFdθ     # (expm(dfdx*t) - I)*inv(dfdx)*f
     end
 
     ϵ_θ += dθ

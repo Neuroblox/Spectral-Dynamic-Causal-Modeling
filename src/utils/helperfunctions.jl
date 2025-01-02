@@ -36,28 +36,6 @@ function unvecparam(vals, param::OrderedDict)
     return paramnewvals
 end
 
-
-"""
-    function matlab_norm(A, p)
-
-    Simple helper function to implement the norm of a matrix that is equivalent to the one given in MATLAB for order=1, 2, Inf. 
-    This is needed for the reproduction of the exact same results of SPM12.
-
-    Arguments:
-    - `A`: matrix
-    - `p`: order of norm
-"""
-function matlab_norm(M, p)
-    if p == 1
-        return maximum(vec(sum(abs.(M),dims=1)))
-    elseif p == Inf
-        return maximum(vec(sum(abs.(M),dims=2)))
-    elseif p == 2
-        print("Not implemented yet!\n")
-        return NaN
-    end
-end
-
 """
     function spm_logdet(M)
 

@@ -36,7 +36,7 @@ g = MetaDiGraph()
 regions = Dict()
 
 # decay parameter for hemodynamics lnκ and ratio of intra- to extra-vascular components lnϵ is shared across brain regions 
-@parameters lnκ=0.0 [tunable = true] lnϵ=0.0 [tunable=true] C=1/16 [tunable = false]   # setting tunable=true means that these parameters are optimized
+@parameters lnκ=vars["pE"]["decay"] [tunable = true] lnϵ=vars["pE"]["epsilon"] [tunable=true] C=1/16 [tunable = false]   # setting tunable=true means that these parameters are optimized
 for ii = 1:nr
     region = LinearNeuralMass(;name=Symbol("r$(ii)₊lm"))
     add_blox!(g, region)
@@ -46,7 +46,7 @@ for ii = 1:nr
     add_edge!(g, nv(g), nv(g) - 1, Dict(:weight => C))
 
     # add hemodynamic response model and observation model (BOLD signal)
-    measurement = BalloonModel(;name=Symbol("r$(ii)₊bm"), lnκ=lnκ, lnϵ=lnϵ)
+    measurement = BalloonModel(;name=Symbol("r$(ii)₊bm"), lnκ=lnκ, lnϵ=lnϵ, lnτ=vars["pE"]["transit"][ii])
     add_blox!(g, measurement)
     # connect measurement with neuronal signal
     add_edge!(g, nv(g) - 2, nv(g), Dict(:weight => 1.0))
@@ -61,7 +61,7 @@ end
 
 for (i, idx) in enumerate(CartesianIndices(vars["pE"]["A"]))
     if idx[1] == idx[2]
-        add_edge!(g, regions[idx[1]], regions[idx[2]], :weight, -exp(A[i])/2)  # treatement of diagonal elements in SPM12
+        add_edge!(g, regions[idx[1]], regions[idx[2]], :weight, -exp(A[i])/2)    # treatement of diagonal elements in SPM12
     else
         add_edge!(g, regions[idx[2]], regions[idx[1]], :weight, A[i])
     end
@@ -98,15 +98,15 @@ np = sum(tunable_parameters(fullmodel); init=0) do par
 end
 indices = Dict(:dspars => collect(1:np))
 # Noise parameter mean
-modelparam[:lnα] = [0.0, 0.0];           # intrinsic fluctuations, ln(α) as in equation 2 of Friston et al. 2014 
+modelparam[:lnα] = vars["pE"]["a"];           # intrinsic fluctuations, ln(α) as in equation 2 of Friston et al. 2014 
 n = length(modelparam[:lnα]);
 indices[:lnα] = collect(np+1:np+n);
 np += n;
-modelparam[:lnβ] = [0.0, 0.0];           # global observation noise, ln(β) as above
+modelparam[:lnβ] = vars["pE"]["b"];           # global observation noise, ln(β) as above
 n = length(modelparam[:lnβ]);
 indices[:lnβ] = collect(np+1:np+n);
 np += n;
-modelparam[:lnγ] = zeros(Float64, nr);   # region specific observation noise
+modelparam[:lnγ] = vars["pE"]["c"];   # region specific observation noise
 indices[:lnγ] = collect(np+1:np+nr);
 np += nr
 indices[:u] = idx_u
@@ -142,7 +142,9 @@ csdsetup = Dict(:p => 8, :freq => vec(vars["Hz"]), :dt => vars["dt"]);
 # HACK: on machines with very small amounts of RAM, Julia can run out of stack space while compiling the code called in this loop
 # this should be rewritten to abuse the compiler less, but for now, an easy solution is just to run it with more allocated stack space.
 with_stack(f, n) = fetch(schedule(Task(f,n)))
-
+foo = Ref{Any}()
+foo2 = Ref{Any}()
+bar = Ref{Any}()
 with_stack(5_000_000) do  # 5MB of stack space
     for iter in 1:max_iter
         state.iter = iter

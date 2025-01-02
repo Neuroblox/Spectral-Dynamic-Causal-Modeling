@@ -454,18 +454,6 @@ function diff(U, dx, f, param::OrderedDict)
     return J, y0
 end
 
-function matlab_norm(A, p)
-    if p == 1
-        return maximum(vec(sum(abs.(A),dims=1)))
-    elseif p == Inf
-        return maximum(vec(sum(abs.(A),dims=2)))
-    elseif p == 2
-        print("Not implemented yet!\n")
-        return NaN
-    end
-end
-
-
 function spm_logdet(M)
     TOL = 1e-16
     s = diag(M)
@@ -487,14 +475,7 @@ function csd_Q(csd)
             end
         end
     end
-    Q = inv(Q .+ matlab_norm(Q, 1)/32*Matrix(I, size(Q)))   # TODO: MATLAB's and Julia's norm function are different! Reconciliate?
-    return Q
-    # the following routine is for situations where no Q is given apriori
-    # Q = zeros(ny,ny,nr)
-    # for i = 1:nr
-    #     Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
-    # end
-
+    return inv(Q .+ opnorm(Q, 1)/32*Matrix(I, size(Q)))
 end
 
 mutable struct vb_state
@@ -630,7 +611,7 @@ end
 
 #     dFdθ = jacobian(f, μθ_po)
 
-#     norm_dFdθ = matlab_norm(dFdθ, Inf);
+#     norm_dFdθ = opnorm(dFdθ, Inf);
 #     revert = isnan(norm_dFdθ) || norm_dFdθ > exp(32);
 
 #     if revert && state.iter > 1
@@ -651,7 +632,7 @@ end
 #             dFdθ = jacobian(f, μθ_po)
 
 #             # check for stability
-#             norm_dFdθ = matlab_norm(dFdθ, Inf);
+#             norm_dFdθ = opnorm(dFdθ, Inf);
 #             revert = isnan(norm_dFdθ) || norm_dFdθ > exp(32);
 
 #             # break
@@ -803,7 +784,7 @@ function variationalbayes(x, y, w, V, p, priors, niter)    # relates to spm_nlsi
 
         dFdθ, f = diff(V, dx, f_prep, μθ_po);
         dFdθ = transpose(reshape(dFdθ, np, ny))
-        norm_dFdθ = matlab_norm(dFdθ, Inf);
+        norm_dFdθ = opnorm(dFdθ, Inf);
         revert = isnan(norm_dFdθ) || norm_dFdθ > exp(32);
 
         if revert && k > 1
@@ -825,7 +806,7 @@ function variationalbayes(x, y, w, V, p, priors, niter)    # relates to spm_nlsi
                 dFdθ = transpose(reshape(dFdθ, np, ny))
 
                 # check for stability
-                norm_dFdθ = matlab_norm(dFdθ, Inf);
+                norm_dFdθ = opnorm(dFdθ, Inf);
                 revert = isnan(norm_dFdθ) || norm_dFdθ > exp(32);
 
                 # break
