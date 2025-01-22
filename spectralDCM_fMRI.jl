@@ -9,7 +9,7 @@ using OrderedCollections
 using SparseDiffTools
 
 include("src/models/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_spm12.jl")             # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_spm25.jl")             # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/utils/mar.jl")                       # multivariate auto-regressive model functions
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
