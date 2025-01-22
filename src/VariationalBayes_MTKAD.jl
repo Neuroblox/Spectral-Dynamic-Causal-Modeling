@@ -202,10 +202,12 @@ function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params
     mar = mar_ml(Matrix(data), p);   # compute MAR from time series y and model order p
     y_csd = mar2csd(mar, ω, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
 
-    jac_fg = generate_jacobian(model, expression = Val{false})[1]   # compute symbolic jacobian.
-
     statevals = [v for v in values(initcond)]
-    derivatives = par -> jac_fg(statevals, addnontunableparams(par, model), t)
+
+    append!(statevals, zeros(length(unknowns(model)) - length(statevals)))
+    f_model = generate_function(model; expression=Val{false})[1]
+    f_at(params, t) = states -> f_model(states, params, t)
+    derivatives = par -> jacobian(f_at(addnontunableparams(par, model), t), statevals)
 
     μθ_pr = vecparam(OrderedDict(priors.name .=> priors.mean))            # note: μθ_po is posterior and μθ_pr is prior
     Σθ_pr = diagm(vecparam(OrderedDict(priors.name .=> priors.variance)))
