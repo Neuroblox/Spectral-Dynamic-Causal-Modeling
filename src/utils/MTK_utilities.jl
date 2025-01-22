@@ -466,16 +466,6 @@ function system_from_graph(g::MetaDiGraph, bc::BloxConnector; name, t_block=miss
     return compose(System(connection_eqs, t, [], params(bc); name), blox_syss)
 end
 
-# function system_from_graph(g::MetaDiGraph, bc::BloxConnector, p::Vector{Num}; name, t_block=missing)
-#     blox_syss = get_sys(g)
-
-#     connection_eqs = get_equations_with_state_lhs(bc)
-    
-#     cbs = identity.(get_callbacks(g, bc; t_block))
-
-#     return compose(System(connection_eqs, t, [], vcat(params(bc), p); name, discrete_events = cbs), blox_syss)
-# end
-
 function system_from_parts(parts::AbstractVector; name)
     return compose(ODESystem(Equation[], t, [], []; name), get_sys.(parts))
 end

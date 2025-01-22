@@ -70,6 +70,6 @@ function csd_Q(csd)
             end
         end
     end
-    Q = inv(Q .+ matlab_norm(Q, 1)/32*Matrix(I, size(Q)))   # TODO: MATLAB's and Julia's norm function are different! Reconciliate?
+    Q = inv(Q .+ opnorm(Q, 1)/32*Matrix(I, size(Q)))
     return Q
 end
