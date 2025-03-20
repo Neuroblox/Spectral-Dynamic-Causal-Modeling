@@ -12,13 +12,13 @@ using LinearAlgebra
 using MKL
 
 
-# simple dispatch for vec to deal with 1xN matrices
-function Base.vec(x::T) where (T <: Real)
-    return x*ones(1)
-end
+include("../src/utils/typedefinitions.jl")
+include("../src/VariationalBayes_MTKAD.jl")
+include("../src/utils/mar.jl")
+include("../src/models/neuraldynamics_MTK.jl")
+include("../src/models/measurement_MTK.jl")
+include("../src/utils/MTK_utilities.jl")
 
-include("../src/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("../src/mar.jl")                      # multivariate auto-regressive model functions
 
 function wrapperfunction(vars, iter)
     y = vars["data"];
@@ -208,9 +208,9 @@ function wrapperfunction_MTK(vars, iter)
 end
 
 # speed comparison between different DCM implementations
-for n in 9:10
-    vals = matread("speedandaccuracy/matlab0.01_" * string(n) *"regions.mat");
-    include("../src/VariationalBayes_spm12.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+for n in 2:10
+    vals = matread("speedandaccuracy/matlab0.1_" * string(n) * "regions.mat");
+    include("../src/VariationalBayes_spm25.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
     wrapperfunction(vals, 1)
     t_juliaSPM = @elapsed res_spm = wrapperfunction(vals, 128)
     include("../src/VariationalBayes_AD.jl")      # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
