@@ -25,7 +25,7 @@ include("src/models/measurement_MTK.jl")
 include("src/utils/MTK_utilities.jl")
 
 ### Load data ###
-vars = matread("./speedandaccuracy/spm12_demo.mat");
+vars = matread("toydata/spm25_demo.mat");
 data = vars["data"];
 x = vars["x"];                       # initial condition of dynamic variabls
 nr = size(data, 2);                  # number of regions
@@ -138,10 +138,10 @@ hyperpriors = Dict(:Πλ_pr => vars["ihC"]*ones(1, 1),   # prior metaparameter p
 
 csdsetup = Dict(:p => 8, :freq => vec(vars["Hz"]), :dt => vars["dt"]);
 
-(state, setup) = setup_sDCM(data, fullmodel, initcond, csdsetup, priors, hyperpriors, indices, "fMRI");
+(state, setup) = setup_spDCM(data, fullmodel, initcond, csdsetup, priors, hyperpriors, indices, "fMRI");
 for iter in 1:max_iter
     state.iter = iter
-    run_sDCM_iteration!(state, setup)
+    run_spDCM_iteration!(state, setup)
     print("iteration: ", iter, " - F:", state.F[end] - state.F[2], " - dF predicted:", state.dF[end], "\n")
     if iter >= 4
         criterion = state.dF[end-3:end] .< setup.tolerance
