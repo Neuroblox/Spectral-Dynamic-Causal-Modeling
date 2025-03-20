@@ -10,6 +10,14 @@ abstract type CompositeBlox <: AbstractBlox end
 abstract type StimulusBlox <: AbstractBlox end
 abstract type ObserverBlox end   # not AbstractBlox since it should not show up in the GUI
 
+struct Connector
+    source::Vector{Symbol}
+    destination::Vector{Symbol}
+    equation::Vector{Equation}
+    weight::Vector{Num}
+    discrete_callbacks
+end
+
 # struct types for Variational Laplace
 mutable struct VLState
     iter::Int                    # number of iteration
@@ -18,7 +26,7 @@ mutable struct VLState
     dF::Vector{Float64}          # predicted free energy changes (store at each iteration)
     λ::Vector{Float64}           # hyperparameter
     ϵ_θ::Vector{Float64}         # prediction error of parameters θ
-    reset_state::Vector{Any}     # store state to reset to [ϵ_θ and λ] when the free energy deteriorates
+    reset_state::Vector{Any}     # store state to reset to [ϵ_θ and λ] when the free energy gets worse rather than better
     μθ_po::Vector{Float64}       # posterior expectation value of parameters 
     Σθ_po::Matrix{Float64}       # posterior covariance matrix of parameters
     dFdθ::Vector{Float64}        # free energy gradient w.r.t. parameters
@@ -33,4 +41,5 @@ struct VLSetup{Model, T1 <: Array{ComplexF64}, T2 <: AbstractArray}
     systemvecs::Vector{Vector{Float64}}       # μθ_pr: prior expectation values of parameters and μλ_pr: prior expectation values of hyperparameters
     systemmatrices::Vector{Matrix{Float64}}   # Πθ_pr: prior precision matrix of parameters, Πλ_pr: prior precision matrix of hyperparameters
     Q::T2                                     # linear decomposition of precision matrix of parameters, typically just one matrix, the empirical correlation matrix
+    modelparam::OrderedDict
 end
