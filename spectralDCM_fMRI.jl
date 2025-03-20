@@ -9,11 +9,11 @@ using OrderedCollections
 using SparseDiffTools
 
 include("src/models/hemodynamic_response.jl")     # hemodynamic and BOLD signal model
-include("src/VariationalBayes_spm25.jl")             # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
+include("src/VariationalBayes_AD.jl")          # this can be switched between _spm12 and _AD version. There is also a separate ADVI version in VariationalBayes_ADVI.jl
 include("src/utils/mar.jl")                       # multivariate auto-regressive model functions
 
 ### get data and compute cross spectral density which is the actual input to the spectral DCM ###
-vars = matread("./speedandaccuracy/spm12_demo.mat");
+vars = matread("toydata/spm25_demo.mat");
 
 y = vars["data"];
 nd = size(y, 2);
@@ -45,11 +45,9 @@ end
 
 Q = csd_Q(y_csd);                 # compute prior of Q, the precision (of the data) components. See Friston etal. 2007 Appendix A
 
-A = vars["pE"]["A"]
-
 priors = Dict(:μ => OrderedDict{Any, Any}(
-                                             :A => A,                         # prior mean of connectivity matrix
-                                             :C => ones(Float64, nd),         # C as in equation 3. NB: whatever C is defined to be here, it will be replaced in csd_approx. Another strange thing of SPM12...
+                                             :A => vars["pE"]["A"],           # prior mean of connectivity matrix
+                                             :C => ones(Float64, nd),         # C as in equation 3. NB: whatever C is defined to be here, it will be replaced in csd_approx. Another strange thing of SPM...
                                              :lnτ => vars["pE"]["transit"],   # hemodynamic transit parameter
                                              :lnκ => vars["pE"]["decay"],     # hemodynamic decay time
                                              :lnϵ => vars["pE"]["epsilon"],   # BOLD signal ratio between intra- and extravascular signal
@@ -66,4 +64,6 @@ priors = Dict(:μ => OrderedDict{Any, Any}(
              );
 
 ### Compute the DCM ###
-@time results = variationalbayes(x, y_csd, freqs, V, p, priors, 128);
+state = variationalbayes(x, y_csd, freqs, V, p, priors, 128);
+state.μθ_po
+state.F
