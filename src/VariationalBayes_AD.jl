@@ -1,124 +1,15 @@
-#= Define notational equivalences between SPM12 and this code:
-
-# the following two precision matrices will not be updated by the code,
-# they belong to the assumed prior distribution p (fixed, but what if it isn't
-# the ground truth?)
-ipC = Πθ_pr   # precision matrix of prior of parameters p(θ)
-ihC = Πλ_pr   # precision matrix of prior of hyperparameters p(λ)
-
-Variational distribution parameters:
-pE, Ep = μθ_pr, μθ   # prior expectation of parameters (q(θ))
-pC, Cp = θΣ, Σθ   # prior covariance of parameters (q(θ))
-hE, Eh = μλ_pr, μλ   # prior expectation of hyperparameters (q(λ))
-hC, Ch = λΣ, Σλ   # prior covariance of hyperparameters (q(λ))
-
-Σ, iΣ  # data covariance matrix (likelihood), and its inverse (precision of likelihood - use Π only for those precisions that don't change)
-Q      # components of iΣ; definition: iΣ = sum(exp(λ)*Q)
-=#
-
 # compute Jacobian of rhs w.r.t. variable -> matrix exponential solution (use ExponentialUtilities.jl)
 # -> use this numerical integration as solution to the diffeq to then differentiate solution w.r.t. parameters (like sensitivity analysis in Ma et al. 2021)
 # -> that Jacobian is used in all the computations of the variational Bayes
 
-
-using LinearAlgebra: Eigen
-using ForwardDiff
-using ForwardDiff: Dual
-using ForwardDiff: Partials
-using FFTW: ifft
+using ForwardDiff: Dual, Partials, jacobian
 ForwardDiff.can_dual(::Type{Complex{Float64}}) = true
-using ChainRules: _eigen_norm_phase_fwd!
-using Serialization
+
 tagtype(::Dual{T,V,N}) where {T,V,N} = T
 
-counter = 0 
-# Base.eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
-# Base.signbit(x::Complex{T}) where {T<:AbstractFloat} = real(x) < 0
-# struct NeurobloxTag end
+include("utils/helperfunctions.jl")
+include("utils/helperfunctions_AD.jl")
 
-function idft(x::AbstractArray)
-    """discrete inverse fourier transform"""
-    N = size(x)[1]
-    out = Array{eltype(x)}(undef,N)
-    for n in 0:N-1
-        out[n+1] = 1/N*sum([x[k+1]*exp(2*im*π*k*n/N) for k in 0:N-1])
-    end
-    return out
-end
-
-function FFTW.ifft(x::Array{Complex{Dual{T, P, N}}}) where {T, P, N}
-    return ifft(real(x)) + 1im*ifft(imag(x))
-end
-
-function FFTW.ifft(x::Array{Dual{T, P, N}}) where {T, P, N}
-    v = (tmp->tmp.value).(x)
-    iftx = ifft(v)
-    iftrp = Array{Partials}(undef, length(x))
-    iftip = Array{Partials}(undef, length(x))
-    local iftrp_agg, iftip_agg
-    for i = 1:N
-        dx = (tmp->tmp.partials[i]).(x)
-        iftdx = ifft(dx)
-        if i == 1
-            iftrp_agg = real(iftdx) .* dx
-            iftip_agg = (1im * imag(iftdx)) .* dx
-        else
-            iftrp_agg = cat(iftrp_agg, real(iftdx) .* dx, dims=2)
-            iftip_agg = cat(iftip_agg, (1im * imag(iftdx)) .* dx, dims=2)
-        end
-    end
-    for i = 1:length(x)
-        iftrp[i] = Partials(Tuple(iftrp_agg[i, :]))
-        iftip[i] = Partials(Tuple(iftip_agg[i, :]))
-    end
-    return Complex.(Dual{T, P, N}.(real(iftx), iftrp), Dual{T, P, N}.(imag(iftx), iftip))
-end
-
-function LinearAlgebra.eigen(M::Matrix{Dual{T, P, np}}) where {T, P, np}
-    nd = size(M, 1)
-    A = (p->p.value).(M)
-    F = eigen(A, sortby=nothing, permute=true)
-    λ, V = F.values, F.vectors
-    local ∂λ_agg, ∂V_agg
-    # compute eigenvalue and eigenvector derivatives for all partials
-    for i = 1:np
-        dA = (p->p.partials[i]).(M)
-        tmp = V \ dA
-        ∂K = tmp * V   # V^-1 * dA * V
-        ∂Kdiag = @view ∂K[diagind(∂K)]
-        ∂λ_tmp = eltype(λ) <: Real ? real.(∂Kdiag) : copy(∂Kdiag)   # why do only copy when complex??
-        ∂K ./= transpose(λ) .- λ
-        fill!(∂Kdiag, 0)
-        ∂V_tmp = mul!(tmp, V, ∂K)
-        _eigen_norm_phase_fwd!(∂V_tmp, A, V)
-        if i == 1
-            ∂V_agg = ∂V_tmp
-            ∂λ_agg = ∂λ_tmp
-        else
-            ∂V_agg = cat(∂V_agg, ∂V_tmp, dims=3)
-            ∂λ_agg = cat(∂λ_agg, ∂λ_tmp, dims=2)
-        end
-    end
-    ∂V = Array{Partials}(undef, nd, nd)
-    ∂λ = Array{Partials}(undef, nd)
-    # reassemble the aggregated vectors and values into a Partials type
-    for i = 1:nd
-        ∂λ[i] = Partials(Tuple(∂λ_agg[i, :]))
-        for j = 1:nd
-            ∂V[i, j] = Partials(Tuple(∂V_agg[i, j, :]))
-        end
-    end
-    if eltype(V) <: Complex
-        evals = map((x,y)->Complex(Dual{T, Float64, length(y)}(real(x), Partials(Tuple(real(y)))), 
-                                   Dual{T, Float64, length(y)}(imag(x), Partials(Tuple(imag(y))))), F.values, ∂λ)
-        evecs = map((x,y)->Complex(Dual{T, Float64, length(y)}(real(x), Partials(Tuple(real(y)))), 
-                                   Dual{T, Float64, length(y)}(imag(x), Partials(Tuple(imag(y))))), F.vectors, ∂V)
-    else
-        evals = Dual{T, Float64, length(∂λ[1])}.(F.values, ∂λ)
-        evecs = Dual{T, Float64, length(∂V[1])}.(F.vectors, ∂V)
-    end
-    return Eigen(evals, evecs)
-end
 
 function transferfunction(x, w, θμ, C, lnϵ, lndecay, lntransit)
     # compute transfer function of Volterra kernels, see fig 1 in friston2014
@@ -281,7 +172,6 @@ end
     for i = 1:nd
         Gn[:,i,i] .+= exp(γ[i])*G
     end
-    global counter += 1
 
     # global components
     for i = 1:nd
@@ -325,49 +215,6 @@ end
 end
 
 
-function matlab_norm(A, p)
-    if p == 1
-        return maximum(vec(sum(abs.(A),dims=1)))
-    elseif p == Inf
-        return maximum(vec(sum(abs.(A),dims=2)))
-    elseif p == 2
-        print("Not implemented yet!\n")
-        return NaN
-    end
-end
-
-
-function spm_logdet(M)
-    TOL = 1e-16
-    s = diag(M)
-    if sum(abs.(s)) != sum(abs.(M[:]))
-        ~, s, ~ = svd(M)
-    end
-    return sum(log.(s[(s .> TOL) .& (s .< TOL^-1)]))
-end
-
-function csd_Q(csd)
-    s = size(csd)
-    Qn = length(csd)
-    Q = zeros(ComplexF64, Qn, Qn);
-    idx = CartesianIndices(csd)
-    for Qi  = 1:Qn
-        for Qj = 1:Qn
-            if idx[Qi][1] == idx[Qj][1]
-                Q[Qi,Qj] = csd[idx[Qi][1], idx[Qi][2], idx[Qj][2]]*csd[idx[Qi][1], idx[Qi][3], idx[Qj][3]]
-            end
-        end
-    end
-    Q = inv(Q .+ matlab_norm(Q, 1)/32*Matrix(I, size(Q)))   # TODO: MATLAB's and Julia's norm function are different! Reconciliate?
-    return Q
-    # the following routine is for situations where no Q is given apriori
-    # Q = zeros(ny,ny,nr)
-    # for i = 1:nr
-    #     Q[((i-1)*ns+1):(i*ns), ((i-1)*ns+1):(i*ns), i] = Matrix(1.0I, ns, ns)
-    # end
-
-end
-
 mutable struct vb_state
     iter::Int
     F::Float64
@@ -376,36 +223,6 @@ mutable struct vb_state
     μθ_po::Vector{Float64}
     Σθ::Matrix{Float64}
 end
-
-function vecparam(param::OrderedDict{T1, T2}) where {T1, T2}
-    flatparam = Float64[]
-    for v in values(param)
-        if (typeof(v) <: Array)
-            for vv in v
-                push!(flatparam, vv)
-            end
-        else
-            push!(flatparam, v)
-        end
-    end
-    return flatparam
-end
-
-function unvecparam(vals, param::OrderedDict{T1, T2}) where {T1, T2}
-    iter = 1
-    paramnewvals = copy(param)
-    for (k, v) in param
-        if (typeof(v) <: Array)
-            paramnewvals[k] = vals[iter:iter+length(v)-1]
-            iter += length(v)
-        else
-            paramnewvals[k] = vals[iter]
-            iter += 1
-        end
-    end
-    return paramnewvals
-end
-
 
 @views function variationalbayes(x, y, w, V, p, priors, niter)
     # extract priors
@@ -435,13 +252,11 @@ end
     criterion = [false, false, false, false]
     state = vb_state(0, F, λ, zeros(np), μθ_po, inv(Πθ_pr))
     dfdp = zeros(ComplexF64, length(w)*size(x,1)^2, np)
-    local ϵ_λ, iΣ, Σλ, Σθ, dFdpp, dFdp
+    local ϵ_λ, iΣ, Σλ, Σθ_po, dFdpp, dFdp
     for k = 1:niter
         state.iter = k
-        # J_test = JacVec(f_prep, μθ_po)
-        # dfdp = stack(J_test*v for v in eachcol(V))
         dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
-        norm_dfdp = matlab_norm(dfdp, Inf);
+        norm_dfdp = opnorm(dfdp, Inf);
         revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
         if revert && k > 1
@@ -464,7 +279,7 @@ end
                 dfdp = ForwardDiff.jacobian(f_prep, μθ_po) * V
 
                 # check for stability
-                norm_dfdp = matlab_norm(dfdp, Inf);
+                norm_dfdp = opnorm(dfdp, Inf);
                 revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
                 # break
@@ -482,7 +297,7 @@ end
         P = zeros(eltype(J), size(Q))
         PΣ = zeros(eltype(J), size(Q))
         JPJ = zeros(real(eltype(J)), size(J,2), size(J,2), size(Q,3))
-        dFdλ = zeros(eltype(J), nh)
+        dFdλ = zeros(real(eltype(J)), nh)
         dFdλλ = zeros(real(eltype(J)), nh, nh)
         for m = 1:8   # 8 seems arbitrary. Numbers of iterations taken from SPM12 code.
             iΣ = zeros(eltype(J), ny, ny)
@@ -490,21 +305,28 @@ end
                 iΣ .+= Q[:,:,i]*exp(λ[i])
             end
 
-            Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why?
-            Σθ = inv(Pp + Πθ_pr)
+            Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why is this okay?
+            Σθ_po = inv(Pp + Πθ_pr)
 
-            for i = 1:nh
-                P[:,:,i] = Q[:,:,i]*exp(λ[i])
-                PΣ[:,:,i] = iΣ \ P[:,:,i]
-                JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above), what's the rational?
-            end
-            for i = 1:nh
-                dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ * JPJ[:,:,i]))/2
-                for j = i:nh
-                    dFdλλ[i, j] = -real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2
-                    dFdλλ[j, i] = dFdλλ[i, j]
+            if nh > 1
+                for i = 1:nh
+                    P[:,:,i] = Q[:,:,i]*exp(λ[i])
+                    PΣ[:,:,i] = real(iΣ \ P[:,:,i])
+                    JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above)
                 end
+                for i = 1:nh
+                    dFdλ[i] = (tr(PΣ[:,:,i])*nq - real(dot(ϵ, P[:,:,i], ϵ)) - tr(Σθ_po * JPJ[:,:,i]))/2
+                    for j = i:nh
+                        dFdλλ[i, j] = -real(tr(PΣ[:,:,i] * PΣ[:,:,j]))*nq/2
+                        dFdλλ[j, i] = dFdλλ[i, j]
+                    end
+                end
+            else
+                dFdλ[1, 1] = ny/2 - real(ϵ'*iΣ*ϵ)/2 - tr(Σθ_po * Pp)/2;
+                dFdλλ[1, 1] = - ny/2;
             end
+
+            dFdλλ = dFdλλ + diagm(dFdλ);
 
             ϵ_λ = λ - μλ_pr
             dFdλ = dFdλ - Πλ_pr*ϵ_λ
@@ -535,7 +357,7 @@ end
         ## E-Step with Levenberg-Marquardt regularization    // comment from MATLAB code
         L = zeros(real(eltype(iΣ)), 3)
         L[1] = (real(logdet(iΣ))*nq - real(dot(ϵ, iΣ, ϵ)) - ny*log(2pi))/2
-        L[2] = (logdet(Πθ_pr * Σθ) - dot(ϵ_θ, Πθ_pr, ϵ_θ))/2
+        L[2] = (logdet(Πθ_pr * Σθ_po) - dot(ϵ_θ, Πθ_pr, ϵ_θ))/2
         L[3] = (logdet(Πλ_pr * Σλ) - dot(ϵ_λ, Πλ_pr, ϵ_λ))/2
         F = sum(L)
 
@@ -547,7 +369,7 @@ end
             # accept current state
             state.ϵ_θ = ϵ_θ
             state.λ = λ
-            state.Σθ = Σθ
+            state.Σθ = Σθ_po
             state.μθ_po = μθ_po
             state.F = F
             # Conditional update of gradients and curvature
@@ -585,7 +407,7 @@ end
     end
     print("iterations terminated\n")
     state.F = F
-    state.Σθ = V*Σθ*V'
+    state.Σθ = V*Σθ_po*V'
     state.μθ_po = μθ_po
     return state
 end
