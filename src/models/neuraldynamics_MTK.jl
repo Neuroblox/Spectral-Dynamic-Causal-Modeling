@@ -20,30 +20,28 @@ Arguments:
 """
 
 struct LinearNeuralMass <: NeuralMassBlox
-    params
-    output
-    jcn
-    odesystem
+    system
     namespace
-    function LinearNeuralMass(;name, namespace=nothing, C=0.0625)
-        p = paramscoping(C=C)
-        C = ModelingToolkit.setmetadata(p[1], ModelingToolkit.VariableTunable, false)   # TODO: change paramscoping to be able to pass tunable flag
-        sts = @variables x(t)=0.0 [output=true] jcn(t)=0.0 [input=true]
+
+    function LinearNeuralMass(;name, namespace=nothing)
+        sts = @variables x(t)=0.0 [output=true] jcn(t) [input=true]
         eqs = [D(x) ~ jcn]
         sys = System(eqs, t, name=name)
-        new(p, sts[1], sts[2], sys, namespace)
+        new(sys, namespace)
     end
 end
 
+# Simple input blox
 mutable struct ExternalInput <: StimulusBlox
     namespace
-    output::Num
-    odesystem::ODESystem
-    function ExternalInput(;name, I=1.0, namespace=nothing)
-        sts = @variables u(t)=0.0 [irreducible=true, description="ext_input"]
+    system
+
+    function ExternalInput(;name, I=0.0, namespace=nothing)
+        sts = @variables u(t)=0.0 [output=true, irreducible=true, description="ext_input"]
         eqs = [u ~ I]
         odesys = System(eqs, t, sts, []; name=name)
-        new(namespace, sts[1], odesys)
+
+        new(namespace, odesys)
     end
 end
 
@@ -52,7 +50,7 @@ Ornstein-Uhlenbeck process Blox
 
 variables:
     x(t):  value
-    jcn:   input
+    jcn:   input 
 parameters:
     τ:      relaxation time
 	μ:      average value
@@ -60,20 +58,20 @@ parameters:
 returns:
     an ODE System (but with brownian parameters)
 """
-mutable struct OUBlox <: StimulusBlox
+mutable struct OUBlox <: NeuralMassBlox
     # all parameters are Num as to allow symbolic expressions
     namespace
-    output::Num
-    odesystem::ODESystem
+    stochastic
+    system
     function OUBlox(;name, namespace=nothing, μ=0.0, σ=1.0, τ=1.0)
         p = paramscoping(μ=μ, τ=τ, σ=σ)
         μ, τ, σ = p
-        sts = @variables x(t)=0.0 [output=true]
+        sts = @variables x(t)=0.0 [output=true] jcn(t) [input=true]
         @brownian w
 
-        eqs = [D(x) ~ -(x-μ)/τ + sqrt(2/τ)*σ*w]
-        sys = System(eqs, t, name=name)
-        new(namespace, sts[1], sys)
+        eqs = [D(x) ~ (-x + μ + jcn)/τ + sqrt(2/τ)*σ*w]
+        sys = System(eqs, t; name=name)
+        new(namespace, true, sys)
     end
 end
 
@@ -81,13 +79,13 @@ end
 """
 Jansen-Rit model block for canonical micro circuit, analogous to the implementation in SPM12
 """
-mutable struct JansenRitSPM12 <: NeuralMassBlox
+mutable struct JansenRitSPM <: NeuralMassBlox
     params
     output
     jcn
     odesystem
     namespace
-    function JansenRitSPM12(;name, namespace=nothing, τ=1.0, r=2.0/3.0)
+    function JansenRitSPM(;name, namespace=nothing, τ=1.0, r=2.0/3.0)
         p = paramscoping(τ=τ, r=r)
         τ, r = p
 
