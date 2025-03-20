@@ -1,5 +1,4 @@
 using ForwardDiff: Dual, Partials, jacobian
-# using FFTW: ifft
 ForwardDiff.can_dual(::Type{Complex{Float64}}) = true
 
 tagtype(::Dual{T,V,N}) where {T,V,N} = T
