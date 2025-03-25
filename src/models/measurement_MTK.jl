@@ -1,10 +1,9 @@
 """
-measurement_symbolic.jl 
+fmri.jl 
 
-Models of fMRI and LFP signals.
+Models of fMRI signals.
 
 BalloonModel : computes hemodynamic responses and bold signal
-leadfield    : computes LFP lead fields
 """
 
 
@@ -46,10 +45,9 @@ Citations:
 """
 struct BalloonModel <: ObserverBlox
     params
-    output
-    jcn
-    odesystem
+    system
     namespace
+
     function BalloonModel(;name, namespace=nothing, lnκ=0.0, lnτ=0.0, lnϵ=0.0)
         #= hemodynamic parameters
             H[1] - signal decay                                   d(ds/dt)/ds)
@@ -76,7 +74,7 @@ struct BalloonModel <: ObserverBlox
         p = paramscoping(lnκ=lnκ, lnτ=lnτ, lnϵ=lnϵ)     # finally compile all parameters
         lnκ, lnτ, lnϵ = p                               # assign the modified parameters
 
-        sts = @variables s(t)=0.0 lnu(t)=0.0 lnν(t)=0.0 lnq(t)=0.0 bold(t)=0.0 [irreducible=true, output=true, description="measurement"] jcn(t)=0.0 [input=true]
+        sts = @variables s(t)=0.0 lnu(t)=0.0 lnν(t)=0.0 lnq(t)=0.0 bold(t)=0.0 [irreducible=true, output=true, description="measurement"] jcn(t) [input=true]
 
         eqs = [
             D(s)   ~ jcn - H[1]*exp(lnκ)*s - H[2]*(exp(lnu) - 1),
@@ -85,18 +83,15 @@ struct BalloonModel <: ObserverBlox
             D(lnq) ~ (exp(lnu)/exp(lnq)*((1 - (1 - H[5])^(exp(lnu)^-1))/H[5]) - exp(lnν)^(H[4]^-1 - 1))/(H[3]*exp(lnτ)),
             bold   ~ B[2]*(k1 - k1*exp(lnq) + exp(lnϵ)*B[3]*B[5]*B[1] - exp(lnϵ)*B[3]*B[5]*B[1]*exp(lnq)/exp(lnν) + 1-exp(lnϵ) - (1-exp(lnϵ))*exp(lnν))
         ]
-
-        sys = System(eqs, t, name=name)
-        new(p, Num(0), sts[5], sys, namespace)
+        sys = System(eqs, t; name=name)
+        new(p, sys, namespace)
     end
 end
 
 # Lead field function for LFPs
 struct LeadField <: ObserverBlox
     params
-    output
-    jcn
-    odesystem
+    system
     namespace
 
     function LeadField(;name, namespace=nothing, L=1.0)
@@ -110,6 +105,6 @@ struct LeadField <: ObserverBlox
         ]
 
         sys = System(eqs, t; name=name)
-        new(p, Num(0), sts[2], sys, namespace)
+        new(p, sys, namespace)
     end
 end

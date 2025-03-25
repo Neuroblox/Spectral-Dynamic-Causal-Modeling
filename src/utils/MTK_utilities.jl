@@ -51,189 +51,148 @@ end
 
 ### Blox Connector and Utilities ###
 
-mutable struct BloxConnector
-    eqs::Vector{Equation}
-    weights::Vector{Num}
-
-    BloxConnector() = new(Equation[], Num[])
-
-    function BloxConnector(bloxs)
-        eqs = reduce(vcat, input_equations.(bloxs)) 
-        weights = reduce(vcat, weight_parameters.(bloxs))
-
-        new(eqs, weights)
-    end
-end
-
-function accumulate_equation!(bc::BloxConnector, eq)
-    lhs = eq.lhs
-    idx = find_eq(bc.eqs, lhs)
-    bc.eqs[idx] = bc.eqs[idx].lhs ~ bc.eqs[idx].rhs + eq.rhs
-end
-
-get_equations_with_parameter_lhs(bc) = filter(eq -> ModelingToolkit.isparameter(eq.lhs), bc.eqs)
-
-get_equations_with_state_lhs(bc) = filter(eq -> !ModelingToolkit.isparameter(eq.lhs), bc.eqs)
-
-
 function generate_weight_param(blox_out, blox_in; kwargs...)
     name_out = namespaced_nameof(blox_out)
     name_in = namespaced_nameof(blox_in)
 
     weight = get_weight(kwargs, name_out, name_in)
-    w_name = Symbol("w_$(name_out)_$(name_in)")
     if typeof(weight) == Num   # Symbol
         w = weight
     else
-        w = only(@parameters $(w_name)=weight)
-    end    
+        w_name = Symbol("w_$(name_out)_$(name_in)")
+        w = only(@parameters $(w_name)=weight [tunable=false])
+    end
 
     return w
 end
 
-
-function (bc::BloxConnector)(
-    bloxout::CanonicalMicroCircuitBlox,
-    bloxin::CanonicalMicroCircuitBlox;
+function Connector(
+    blox_src::CanonicalMicroCircuitBlox,
+    blox_dest::CanonicalMicroCircuitBlox;
     kwargs...
 )
-    sysparts_out = get_blox_parts(bloxout)
-    sysparts_in = get_blox_parts(bloxin)
+    sysparts_src = get_parts(blox_src)
+    sysparts_dest = get_parts(blox_dest)
 
-    wm = get_weightmatrix(kwargs, namespaced_nameof(bloxin), namespaced_nameof(bloxout))
+    wm = get_weightmatrix(kwargs, namespaced_nameof(blox_src), namespaced_nameof(blox_dest))
 
     idxs = findall(!iszero, wm)
-    for idx in idxs
-        bc(sysparts_out[idx[2]], sysparts_in[idx[1]]; weight=wm[idx])
+
+    conn = mapreduce(merge!, idxs) do idx
+        Connector(sysparts_src[idx[2]], sysparts_dest[idx[1]]; weight=wm[idx])
     end
+
+    return conn
 end
 
-function (bc::BloxConnector)(
-    bloxout::CanonicalMicroCircuitBlox,
-    bloxin::ObserverBlox;
+function Connector(
+    blox_src::StimulusBlox,
+    blox_dest::CanonicalMicroCircuitBlox;
     kwargs...
 )
-    sysparts_out = get_blox_parts(bloxout)
+    sysparts_dest = get_parts(blox_dest)
+    conn = Connector(blox_src, sysparts_dest[1]; kwargs...)
 
-    bc(sysparts_out[2], bloxin; kwargs...)
+    return conn
 end
 
+function Connector(
+    blox_src::CanonicalMicroCircuitBlox,
+    blox_dest::ObserverBlox;
+    kwargs...
+)
+    sysparts_src = get_parts(blox_src)
+    conn = Connector(sysparts_src[2], blox_dest; kwargs...)
+
+    return conn
+end
 # define a sigmoid function
 # @register_symbolic sigmoid(x, r) = one(x) / (one(x) + exp(-r*x))
 sigmoid(x, r) = one(x) / (one(x) + exp(-r*x)) - 0.5
 
-function (bc::BloxConnector)(
-    bloxout::JansenRitSPM12, 
-    bloxin::JansenRitSPM12; 
+function Connector(
+    blox_src::JansenRitSPM, 
+    blox_dest::JansenRitSPM; 
     kwargs...
 )
-    sys_out = get_namespaced_sys(bloxout)
-    sys_in = get_namespaced_sys(bloxin)
+    sys_src = get_namespaced_sys(blox_src)
+    sys_dest = get_namespaced_sys(blox_dest)
 
-    w = generate_weight_param(bloxout, bloxin; kwargs...)
-    push!(bc.weights, w)
+    w = generate_weight_param(blox_src, blox_dest; kwargs...)
 
-    x = ModelingToolkit.namespace_expr(bloxout.output, sys_out)
-    r = ModelingToolkit.namespace_expr(bloxout.params[2], sys_out)
-    push!(bc.weights, r)
+    x = only(ModelingToolkit.outputs(blox_src; namespaced=true))
+    r = ModelingToolkit.namespace_expr(blox_src.params[2], sys_src)
 
-    eq = sys_in.jcn ~ sigmoid(x, r)*w
-    
-    accumulate_equation!(bc, eq)
+    eq = sys_dest.jcn ~ sigmoid(x, r)*w
+
+    return Connector(nameof(sys_src), nameof(sys_dest); equation=eq, weight=[w, r])
 end
 
-
-function (bc::BloxConnector)(
-    bloxout::NeuralMassBlox, 
-    bloxin::NeuralMassBlox;
+function Connector(
+    blox_src::NeuralMassBlox, 
+    blox_dest::NeuralMassBlox; 
     kwargs...
 )
-    sys_out = get_namespaced_sys(bloxout)
-    sys_in = get_namespaced_sys(bloxin)
+    sys_src = get_namespaced_sys(blox_src)
+    sys_dest = get_namespaced_sys(blox_dest)
 
-    w = generate_weight_param(bloxout, bloxin; kwargs...)
-    push!(bc.weights, w)
+    w = generate_weight_param(blox_src, blox_dest; kwargs...)
+    x = only(ModelingToolkit.outputs(blox_src; namespaced=true))
+    eq = sys_dest.jcn ~ x*w
 
-    x = ModelingToolkit.namespace_expr(bloxout.output, sys_out)
-    eq = sys_in.jcn ~ x*w
-    
-    accumulate_equation!(bc, eq)
+    return Connector(nameof(sys_src), nameof(sys_dest); equation=eq, weight=w)
 end
 
 # additional dispatch to connect to hemodynamic observer blox
-function (bc::BloxConnector)(
-    bloxout::NeuralMassBlox, 
-    bloxin::ObserverBlox; 
-    weight=1
-)
+function Connector(
+    blox_src::NeuralMassBlox, 
+    blox_dest::ObserverBlox;
+    kwargs...)
 
-    sys_out = get_namespaced_sys(bloxout)
-    sys_in = get_namespaced_sys(bloxin)
+    sys_src = get_namespaced_sys(blox_src)
+    sys_dest = get_namespaced_sys(blox_dest)
 
-    w_name = Symbol("w_$(nameof(sys_out))_$(nameof(sys_in))")
-    if typeof(weight) == Num # Symbol
-        w = weight
-    else
-        w = only(@parameters $(w_name)=weight [tunable=false])
-    end
-    push!(bc.weights, w)
-    x = ModelingToolkit.namespace_expr(bloxout.output, sys_out, nameof(sys_out))
-    eq = sys_in.jcn ~ x*w
+    x = only(ModelingToolkit.outputs(blox_src; namespaced=true))
+    w = generate_weight_param(blox_src, blox_dest; kwargs...)
+    eq = sys_dest.jcn ~ x*w
 
-    accumulate_equation!(bc, eq)
+    return Connector(nameof(sys_src), nameof(sys_dest); equation=eq, weight=w)
 end
 
-function (bc::BloxConnector)(
-    bloxout::StimulusBlox,
-    bloxin::CanonicalMicroCircuitBlox;
-    kwargs...
-)
+# additional dispatch to connect to a stimulus blox, first crafted for ExternalInput
+function Connector(
+    blox_src::StimulusBlox,
+    blox_dest::NeuralMassBlox;
+    kwargs...)
 
-    sysparts_in = get_blox_parts(bloxin)
+    sys_src = get_namespaced_sys(blox_src)
+    sys_dest = get_namespaced_sys(blox_dest)
 
-    bc(bloxout, sysparts_in[1]; kwargs...)
-end
+    w = generate_weight_param(blox_src, blox_dest; kwargs...)
+    x = only(ModelingToolkit.outputs(blox_src; namespaced=true))
+    eq = sys_dest.jcn ~ x*w
 
-function (bc::BloxConnector)(
-    bloxout::StimulusBlox,
-    bloxin::NeuralMassBlox;
-    weight=1
-)
-
-    sys_out = get_namespaced_sys(bloxout)
-    sys_in = get_namespaced_sys(bloxin)
-
-    w_name = Symbol("w_$(nameof(sys_out))_$(nameof(sys_in))")
-    if typeof(weight) == Num # Symbol
-        w = weight
-    else
-        w = only(@parameters $(w_name)=weight)
-    end    
-    push!(bc.weights, w)
-
-    x = ModelingToolkit.namespace_expr(bloxout.output, sys_out, nameof(sys_out))
-    eq = sys_in.jcn ~ x*w
-
-    accumulate_equation!(bc, eq)
+    return Connector(nameof(sys_src), nameof(sys_dest); equation=eq, weight=w)
 end
 
 ### Namespacing Utilities ###
-
 function get_namespaced_sys(blox)
-    sys = get_sys(blox)
+    sys = get_system(blox)
+
     System(
-        equations(sys), 
-        independent_variable(sys), 
-        unknowns(sys), 
-        parameters(sys); 
-        name = namespaced_nameof(blox)
-    ) 
+        equations(sys),
+        only(independent_variables(sys)),
+        unknowns(sys),
+        parameters(sys);
+        name = namespaced_nameof(blox),
+        discrete_events = discrete_events(sys)
+    )
 end
 
 get_namespaced_sys(sys::ModelingToolkit.AbstractODESystem) = sys
 
 import ModelingToolkit: nameof
-nameof(blox) = (nameof ∘ get_sys)(blox)
+nameof(blox) = (nameof ∘ get_system)(blox)
 
 namespaceof(blox) = blox.namespace
 
@@ -256,12 +215,46 @@ end
 namespaced_name(parent_name, name) = Symbol(parent_name, :₊, name)
 namespaced_name(::Nothing, name) = Symbol(name)
 
-function find_eq(eqs::AbstractVector{<:Equation}, lhs)
+function find_eq(eqs::Union{AbstractVector{<:Equation}, Equation}, lhs)
     findfirst(eqs) do eq
         lhs_vars = get_variables(eq.lhs)
         length(lhs_vars) == 1 && isequal(only(lhs_vars), lhs)
     end
 end
+
+function ModelingToolkit.outputs(blox::AbstractBlox; namespaced=false)
+    sys = get_namespaced_sys(blox)
+    
+    return namespaced ? ModelingToolkit.namespace_expr.(ModelingToolkit.outputs(sys), Ref(sys)) : ModelingToolkit.outputs(sys)
+end 
+
+function ModelingToolkit.inputs(blox::AbstractBlox; namespaced=false)
+    sys = get_namespaced_sys(blox)
+    
+    return namespaced ? ModelingToolkit.namespace_expr.(ModelingToolkit.inputs(sys), Ref(sys)) : ModelingToolkit.inputs(sys)
+end 
+
+ModelingToolkit.equations(blox::AbstractBlox) = ModelingToolkit.equations(get_namespaced_sys(blox))
+
+ModelingToolkit.unknowns(blox::AbstractBlox) = ModelingToolkit.unknowns(get_namespaced_sys(blox))
+
+ModelingToolkit.parameters(blox::AbstractBlox) = ModelingToolkit.parameters(get_namespaced_sys(blox))
+
+get_equations_with_state_lhs(eqs::AbstractVector{<:Equation}) = filter(eq -> !ModelingToolkit.isparameter(eq.lhs), eqs)
+
+get_equations_with_parameter_lhs(eqs::AbstractVector{<:Equation}) = filter(eq -> !ModelingToolkit.isparameter(eq.lhs), eqs)
+
+function Base.merge!(c1::Connector, c2::Connector)
+    append!(c1.source, c2.source)
+    append!(c1.destination, c2.destination)
+    accumulate_equations!(c1.equation, c2.equation)
+    append!(c1.weight, c2.weight)
+    append!(c1.discrete_callbacks, c2.discrete_callbacks)
+    return c1
+end
+
+Base.merge(c1::Connector, c2::Connector) = Base.merge!(deepcopy(c1), c2)
+
 
 """
     Returns the equations for all input variables of a system, 
@@ -273,93 +266,124 @@ end
     the higher-level namespaces will be added to them.
 
     If blox isa AbstractComponent, it is assumed that it contains a `connector` field,
-    which holds a `BloxConnector` object with all relevant connections 
+    which holds a `Connector` object with all relevant connections 
     from lower levels and this level.
 """
-function input_equations(blox)
-    sys = get_sys(blox)
-    inps = ModelingToolkit.inputs(sys)
+function get_input_equations(blox::Union{AbstractBlox, ObserverBlox}; namespaced=true)
+    sys = get_system(blox)
     sys_eqs = equations(sys)
 
-    eqs = map(inps) do inp
-        idx = find_eq(sys_eqs, inp)
-        if isnothing(idx)
-            ModelingToolkit.namespace_equation(
-                inp ~ 0, 
-                sys,
-                namespaced_name(inner_namespaceof(blox), nameof(blox))
-            )
+    inps = ModelingToolkit.inputs(sys)
+    filter!(inp -> isnothing(find_eq(sys_eqs, inp)), inps)
+
+    if !isempty(inps)
+        eqs = if namespaced
+            map(inps) do inp
+                ModelingToolkit.namespace_equation(
+                    inp ~ 0, 
+                    sys,
+                    namespaced_name(inner_namespaceof(blox), nameof(blox))
+                ) 
+            end
         else
-            ModelingToolkit.namespace_equation(
-                sys_eqs[idx],
-                sys,
-                namespaced_name(inner_namespaceof(blox), nameof(blox))
-            )
+            map(inps) do inp
+                inp ~ 0
+            end
+        end
+
+        return eqs
+    else
+        return Equation[]
+    end
+end
+
+get_input_equations(blox) = []
+
+function accumulate_equations!(eqs::AbstractVector{<:Equation}, bloxs)
+    init_eqs = mapreduce(get_input_equations, vcat, bloxs)
+    accumulate_equations!(eqs, init_eqs)
+
+    return eqs
+end
+
+function accumulate_equations!(eqs1::Vector{<:Equation}, eqs2::Vector{<:Equation})
+    for eq in eqs2
+        lhs = eq.lhs
+        idx = find_eq(eqs1, lhs)
+        
+        if isnothing(idx)
+            push!(eqs1, eq)
+        else
+            eqs1[idx] = eqs1[idx].lhs ~ eqs1[idx].rhs + eq.rhs
+        end
+    end
+
+    return eqs1
+end
+
+function accumulate_equations(eqs1::Vector{<:Equation}, eqs2::Vector{<:Equation})
+    eqs = copy(eqs1)
+    for eq in eqs2
+        lhs = eq.lhs
+        idx = find_eq(eqs1, lhs)
+        
+        if isnothing(idx)
+            push!(eqs, eq)
+        else
+            eqs[idx] = eqs[idx].lhs ~ eqs[idx].rhs + eq.rhs
         end
     end
 
     return eqs
 end
 
-input_equations(blox::AbstractComponent) = blox.connector.eqs
-input_equations(blox::CompositeBlox) = blox.connector.eqs
+ModelingToolkit.equations(c::Connector) = c.equation
 
-weight_parameters(blox) = Num[]
-weight_parameters(blox::AbstractComponent) = blox.connector.weights #I think this is the fix?
-weight_parameters(blox::CompositeBlox) = blox.connector.weights #I think this is the fix?
+Graphs.weights(c::Connector) = c.weight
 
-
-get_blox_parts(blox) = blox.parts
+discrete_callbacks(c::Connector) = c.discrete_callbacks
 
 function get_weight(kwargs, name_blox1, name_blox2)
-    if haskey(kwargs, :weight)
-        return kwargs[:weight]
-    else
-        error("Connection weight from $name_blox1 to $name_blox2 is not specified.")
+    get(kwargs, :weight) do
+        @info "Connection weight from $name_blox1 to $name_blox2 is not specified. Assuming weight=1" 
+        return 1.0
     end
 end
 
 function get_weightmatrix(kwargs, name_blox1, name_blox2)
-    if haskey(kwargs, :weightmatrix)
-        return kwargs[:weightmatrix]
-    else
+    get(kwargs, :weightmatrix) do
         error("Connection weight from $name_blox1 to $name_blox2 is not specified.")
     end
 end
 
-
 ### State and Parameter Utilities ###
 
 """
-    Helper to merge delays and weights into a single vector
+    Helper to aggregate weights into a single vector
 """
-function params(bc::BloxConnector)
-    weights = []
-    for w in bc.weights
-        append!(weights, Symbolics.get_variables(w))
+function params(bc::Connector)
+    wt = map(weights(bc)) do w
+        Symbolics.get_variables(w)
     end
-    if isempty(weights)
-        return weights
-    else
-        return reduce(vcat, weights)
-    end
+
+    return reduce(vcat, wt)
 end
 
 
 """
-    function paramscoping(;kwargs...)
+    function paramscoping(;tunable=true, kwargs...)
     
     Scope arguments that are already a symbolic model parameter thereby keep the correct namespace 
     and make those that are not yet symbolic a symbol.
     Keyword arguments are used, because parameter definition require names, not just values.
 """
-function paramscoping(;kwargs...)
+function paramscoping(;tunable=true, kwargs...)
     paramlist = []
     for (kw, v) in kwargs
         if v isa Num
             paramlist = vcat(paramlist, ParentScope(v))
         else
-            paramlist = vcat(paramlist, @parameters $kw = v [tunable=true])
+            paramlist = vcat(paramlist, @parameters $kw = v [tunable=tunable])
         end
     end
     return paramlist
@@ -457,59 +481,264 @@ function changetune(model, parlist)
 end
 
 ### Graph Utilities ###
+to_vector(v::AbstractVector) = v
+to_vector(v) = [v]
+
+
+function Connector(
+    src::Union{Symbol, Vector{Symbol}}, 
+    dest::Union{Symbol, Vector{Symbol}}; 
+    equation=Equation[], 
+    weight=Num[], 
+    discrete_callbacks=[], 
+    connection_blox=Set([])
+    )
+
+    Connector(
+        to_vector(src), 
+        to_vector(dest), 
+        to_vector(equation), 
+        to_vector(weight), 
+        to_vector(discrete_callbacks), 
+    )
+end
+
+function Base.isempty(conn::Connector)
+    return isempty(conn.equation) && isempty(conn.weight)  && isempty(conn.discrete_callbacks)
+end
+
+Base.show(io::IO, c::Connector) = print(io, "$(c.source) => $(c.destination) with ", c.equation)
+
+function show_field(io::IO, v::AbstractVector, title)
+    if !isempty(v)
+        println(io, title, " :")
+        for val in v
+            println(io, "\t $(val)")
+        end
+    end
+end
+
+function show_field(io::IO, d::Dict, title)
+    if !isempty(d)
+        println(io, title, " :")
+        for (k, v) in d
+            println(io, "\t ", k, " => ", v)
+        end
+    end
+end
+
+
+get_connectors(blox::CompositeBlox) = blox.connector
+get_connectors(blox) = [Connector(namespaced_nameof(blox), namespaced_nameof(blox))]
+
+get_connector(blox::CompositeBlox) = reduce(merge!, get_connectors(blox))
+get_connector(blox) = Connector(namespaced_nameof(blox), namespaced_nameof(blox))
+
+function merge_discrete_callbacks(cbs::AbstractVector)
+    cbs_functional = Pair[]
+    cbs_symbolic = Pair[]
+
+    for cb in cbs
+        if last(cb) isa Tuple
+            push!(cbs_functional, cb)
+        else
+            push!(cbs_symbolic, cb)
+        end
+    end
+
+    # We need to take care of the edge case where the same condition appears multiple times 
+    # with the same affect. If we merge them using unique(affects) then the affect will apply only once.
+    # But it could be the case that we want this affect to apply as many times as it appears in duplicate callbacks,
+    # e.g. because it is a spike affect coming from different sources that happen to spike exactly at the same condition. 
+    conditions = unique(first.(cbs_symbolic))
+    for c in conditions
+        idxs = findall(cb -> first(cb) == c, cbs_symbolic)
+        affects = mapreduce(last, vcat, cbs_symbolic[idxs])
+        idxs = eachindex(affects)
+
+        affects_to_merge = Equation[]
+        for (i, aff) in enumerate(affects)
+            idxs_rest = setdiff(idxs, i)
+            if isnothing(findfirst(x -> aff == x, affects[idxs_rest]))
+                # If the affect has no duplicate then accumulate it for merging.
+                push!(affects_to_merge, aff)
+            else
+                # If the affect has a duplicate then add them as separate callbacks
+                # so that each one triggers as intended. 
+                push!(cbs_functional, c => [aff])
+            end
+        end
+        if !isempty(affects_to_merge)
+            push!(cbs_functional, c => affects_to_merge)
+        end
+    end
+   
+    return cbs_functional
+end
+
+ModelingToolkit.generate_discrete_callbacks(blox, ::Connector; t_block = missing) = []
+
+function ModelingToolkit.generate_discrete_callbacks(bc::Connector, eqs::AbstractVector{<:Equation}; t_block = missing)
+    eqs_params = get_equations_with_parameter_lhs(eqs)
+    dc = discrete_callbacks(bc)
+
+    if !ismissing(t_block) && !isempty(eqs_params)
+        cb_params = (t_block - sqrt(eps(float(t_block)))) => eqs_params
+        return vcat(cb_params, dc)
+    else
+        return dc
+    end 
+end
+
+function ModelingToolkit.generate_discrete_callbacks(g::MetaDiGraph, bc::Connector, eqs::AbstractVector{<:Equation}; t_block = missing)
+    bloxs = flatten_graph(g)
+
+    cbs = mapreduce(vcat, bloxs) do blox
+        ModelingToolkit.generate_discrete_callbacks(blox, bc; t_block)
+    end
+    cbs_merged = merge_discrete_callbacks(to_vector(cbs))
+
+    cbs_connections = ModelingToolkit.generate_discrete_callbacks(bc, eqs; t_block)
+
+    return vcat(cbs_merged, cbs_connections)
+end
+
+
+function find_blox(g::MetaDiGraph, blox)
+    for v in vertices(g)
+        b = get_prop(g, v, :blox)
+        b == blox && return v
+    end
+
+    return nothing
+end
+
+function Graphs.add_edge!(g::MetaDiGraph, p::Pair; kwargs...)
+    src, dest = p
+    
+    src_idx = find_blox(g, src)
+    
+    if isnothing(src_idx)
+        add_blox!(g, src)
+        src_idx = nv(g)
+    end
+    
+    dest_idx = find_blox(g, dest)
+
+    if isnothing(dest_idx)
+        add_blox!(g, dest)
+        dest_idx = nv(g)
+    end
+
+    Graphs.add_edge!(g, src_idx, dest_idx, Dict(kwargs))
+end
 
 function add_blox!(g::MetaDiGraph,blox)
     add_vertex!(g, :blox, blox)
 end
 
-function get_blox(g::MetaDiGraph)
+function get_bloxs(g::MetaDiGraph)
     bs = []
     for v in vertices(g)
         b = get_prop(g, v, :blox)
         push!(bs, b)
     end
-
     return bs
 end
 
-get_sys(g::MetaDiGraph) = get_sys.(get_blox(g))
-get_sys(blox) = blox.odesystem
-get_sys(sys::ModelingToolkit.AbstractODESystem) = sys
+get_parts(blox::CompositeBlox) = blox.parts
+get_parts(blox::Union{AbstractBlox, ObserverBlox}) = blox
 
+get_components(blox::CompositeBlox) = mapreduce(get_components, vcat, get_parts(blox))
+get_components(blox::Vector{<:AbstractBlox}) = mapreduce(get_components, vcat, blox)
+get_components(blox) = [blox]
+
+get_system(g::MetaDiGraph) = get_system.(get_bloxs(g))
+
+flatten_graph(g::MetaDiGraph) = mapreduce(get_components, vcat, get_bloxs(g))
+
+get_system(blox) = blox.system
+get_system(sys::ModelingToolkit.AbstractODESystem) = sys
+
+
+function connectors_from_graph(g::MetaDiGraph)
+    conns = reduce(vcat, get_connectors.(get_bloxs(g)))
+    for edge in edges(g)
+
+        blox_src = get_prop(g, edge.src, :blox)
+        blox_dest = get_prop(g, edge.dst, :blox)
+
+        kwargs = props(g, edge)
+        push!(conns, Connector(blox_src, blox_dest; kwargs...))
+    end
+   
+    filter!(conn -> !isempty(conn), conns)
+
+    return conns
+end
 
 function connector_from_graph(g::MetaDiGraph)
-    bloxs = get_blox(g)
-    link = BloxConnector(bloxs)
-    for v in vertices(g)
-        b = get_prop(g, v, :blox)
-        for vn in inneighbors(g, v)
-            bn = get_prop(g, vn, :blox)
-            kwargs = props(g, vn, v)
-            link(bn, b; kwargs...)
+    conns = connectors_from_graph(g)
+
+    return isempty(conns) ? Connector(:none, :none) : reduce(merge!, conns)
+end
+
+
+"""
+    system_from_graph(g::MetaDiGraph, p=Num[]; name, simplify=true, graphdynamics=false, kwargs...)
+
+Take in a `MetaDiGraph` `g` describing a network of neural structures (and optionally a vector of extra parameters `p`) and construct a `System` which can be used to construct various `Problem` types (i.e. `ODEProblem`) for use with DifferentialEquations.jl solvers.
+
+If `simplify` is set to `true` (the default), then the resulting system will have `structural_simplify` called on it with any remaining keyword arguments forwared to `structural_simplify`. That is,
+```
+@named sys = system_from_graph(g; kwarg1=x, kwarg2=y)
+```
+is equivalent to
+```
+@named sys = system_from_graph(g; simplify=false)
+sys = structural_simplify(sys; kwarg1=x, kwarg2=y)
+```
+See the docstring for `structural_simplify` for information on which options it supports.
+
+If `graphdynamics=true` (defaults to `false`), the output will be a `GraphSystem` from [GraphDynamics.jl](https://github.com/Neuroblox/GraphDynamics.jl), and the `kwargs` will be sent to the `GraphDynamics` constructor instead of using [ModelingToolkit.jl](https://github.com/SciML/ModelingToolkit.jl/). The GraphDynamics.jl backend is typically significantly faster for large neural systems than the default backend, but is experimental and does not yet support all Neuroblox.jl features. 
+"""
+function system_from_graph(g::MetaDiGraph, p::Vector{Num}=Num[]; name=nothing, t_block=missing, simplify=true, graphdynamics=false, kwargs...)
+    if graphdynamics
+        isempty(p) || error(ArgumentError("The GraphDynamics.jl backend does yet support extra parameter lists. Got $p."))
+        GraphDynamicsInterop.graphsystem_from_graph(g; kwargs...)
+    else
+        if isnothing(name)
+            throw(UndefKeywordError(:name))
         end
+        
+        conns = connectors_from_graph(g)
+    
+        return system_from_graph(g, conns, p; name, t_block, simplify, kwargs...)
     end
-
-    return link
 end
 
-function system_from_graph(g::MetaDiGraph; name, t_block=missing)
-    bc = connector_from_graph(g)
-    return system_from_graph(g, bc; name, t_block)
-end
+function system_from_graph(g::MetaDiGraph, conns::AbstractVector{<:Connector}, p::Vector{Num}=Num[]; name=nothing, t_block=missing, simplify=true, graphdynamics=false, kwargs...)
+    bloxs = get_bloxs(g)
+    blox_syss = get_system.(bloxs)
 
-# Additional dispatch if extra parameters are passed for edge definitions
-function system_from_graph(g::MetaDiGraph, p::Vector{Num}; name, t_block=missing)
-    bc = connector_from_graph(g)
-    return system_from_graph(g, bc, p; name, t_block)
-end
+    bc = isempty(conns) ? Connector(name, name) : reduce(merge!, conns)
 
-function system_from_graph(g::MetaDiGraph, bc::BloxConnector; name, t_block=missing)
-    blox_syss = get_sys(g)
+    eqs = equations(bc)
+    eqs_init = mapreduce(get_input_equations, vcat, bloxs)
+    accumulate_equations!(eqs_init, eqs)
 
-    connection_eqs = get_equations_with_state_lhs(bc)
-    return compose(System(connection_eqs, t, [], params(bc); name), blox_syss)
+    connection_eqs = get_equations_with_state_lhs(eqs_init)
+
+    discrete_cbs = identity.(ModelingToolkit.generate_discrete_callbacks(g, bc, eqs_init; t_block))
+    sys = compose(System(connection_eqs, t, [], vcat(params(bc), p); name, discrete_events = discrete_cbs), blox_syss)
+
+    if simplify
+        structural_simplify(sys; kwargs...)
+    else
+        sys
+    end
 end
 
 function system_from_parts(parts::AbstractVector; name)
-    return compose(ODESystem(Equation[], t, [], []; name), get_sys.(parts))
+    return compose(System(Equation[], t; name), get_system.(parts))
 end

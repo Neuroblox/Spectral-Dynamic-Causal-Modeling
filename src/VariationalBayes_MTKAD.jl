@@ -168,9 +168,8 @@ end
     return y
 end
 
-
 """
-    function setup_sDCM(data, stateevolutionmodel, initcond, csdsetup, priors, hyperpriors, params_idx)
+    function setup_sDCM(data, stateevolutionmodel, initcond, csdsetup, priors, hyperpriors, indices)
 
     Interface function to performs variational inference to fit model parameters to empirical cross spectral density.
     The current implementation provides a Variational Laplace fit (see function above `variationalbayes`).
@@ -190,65 +189,65 @@ end
     - `hyperpriors` : dataframe of parameters with the following columns:
     -- `Πλ_pr`      : prior precision matrix for λ hyperparameter(s)
     -- `μλ_pr`      : prior mean(s) for λ hyperparameter(s)
-    - `params_idx`  : indices to separate model parameters from other parameters. Needed for the computation of AD gradient.
-    - `modality`    : which modality? Currently fMRI and LFP is available.
+    - `indices`  : indices to separate model parameters from other parameters. Needed for the computation of AD gradient.
 """
-function setup_sDCM(data, model, initcond, csdsetup, priors, hyperpriors, params_idx, modality)
+function setup_spDCM(data, model, initcond, csdsetup, priors, hyperpriors, indices, modelparam, modality)
     # compute cross-spectral density
-    dt = csdsetup[:dt];              # order of MAR. Hard-coded in SPM12 with this value. We will use the same for now.
-    ω = csdsetup[:freq];             # frequencies at which the CSD is evaluated
-    p = csdsetup[:p];                # order of MAR
-    mar = mar_ml(Matrix(data), p);   # compute MAR from time series y and model order p
-    y_csd = mar2csd(mar, ω, dt^-1);  # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
+    dt = csdsetup.dt;                      # order of MAR. Hard-coded in SPM12 with this value. We will use the same for now.
+    freq = csdsetup.freq;                  # frequencies at which the CSD is evaluated
+    mar_order = csdsetup.mar_order;        # order of MAR
+    mar = mar_ml(data, mar_order);         # compute MAR from time series y and model order p
+    y_csd = mar2csd(mar, freq, dt^-1);     # compute cross spectral densities from MAR parameters at specific frequencies freqs, dt^-1 is sampling rate of data
 
     statevals = [v for v in values(initcond)]
-
     append!(statevals, zeros(length(unknowns(model)) - length(statevals)))
     f_model = generate_function(model; expression=Val{false})[1]
-    f_at(params, t) = states -> f_model(states, params, t)
+    f_at(params, t) = states -> f_model(states, MTKParameters(model, params)..., t)
     derivatives = par -> jacobian(f_at(addnontunableparams(par, model), t), statevals)
 
-    μθ_pr = vecparam(OrderedDict(priors.name .=> priors.mean))            # note: μθ_po is posterior and μθ_pr is prior
-    Σθ_pr = diagm(vecparam(OrderedDict(priors.name .=> priors.variance)))
+    μθ_pr = vecparam(priors.μθ_pr)        # note: μθ_po is posterior and μθ_pr is prior
+    Σθ_pr = diagm(vecparam(priors.Σθ_pr))
 
     ### Collect prior means and covariances ###
     if haskey(hyperpriors, :Q)
-        Q = hyperpriors[:Q];
+        Q = hyperpriors.Q;
     else
-        Q = csd_Q(y_csd);                 # compute functional connectivity prior Q. See Friston etal. 2007 Appendix A
+        Q = csd_Q(y_csd);             # compute functional connectivity prior Q. See Friston etal. 2007 Appendix A
     end
     nq = 1                            # TODO: this is hard-coded, need to make this compliant with csd_Q
     nh = size(Q, 3)                   # number of precision components (this is the same as above, but may differ)
-    nr = length(params_idx[:lnγ])     # region specific noise parameter can be used to get the number of regions
-    f = params -> csd_mtf(ω, p, derivatives, params, params_idx, modality)
+    nr = length(indices[:lnγ])        # region specific noise parameter can be used to get the number of regions
+
+    f = params -> csd_mtf(freq, mar_order, derivatives, params, indices, modality)
 
     np = length(μθ_pr)     # number of parameters
     ny = length(y_csd)     # total number of response variables
 
     # variational laplace state variables
     vlstate = VLState(
-        0,                     # iter
-        -4,                    # log ascent rate
-        [-Inf],                # free energy
-        [],                    # delta free energy
-        hyperpriors[:μλ_pr],   # metaparameter, initial condition. TODO: why are we not just using the prior mean?
-        zeros(np),             # parameter estimation error ϵ_θ
-        [zeros(np), hyperpriors[:μλ_pr]],      # memorize reset state
-        μθ_pr,                 # parameter posterior mean
-        Σθ_pr,                 # parameter posterior covariance
+        0,                                   # iter
+        -4,                                  # log ascent rate
+        [-Inf],                              # free energy
+        Float64[],                           # delta free energy
+        hyperpriors.μλ_pr,                   # metaparameter, initial condition.
+        zeros(np),                           # parameter estimation error ϵ_θ
+        [zeros(np), hyperpriors.μλ_pr],      # memorize reset state
+        μθ_pr,                               # parameter posterior mean
+        Σθ_pr,                               # parameter posterior covariance
         zeros(np),
         zeros(np, np)
     )
 
     # variational laplace setup
     vlsetup = VLSetup(
-        f,                    # function that computes the cross-spectral density at fixed point 'initcond'
-        y_csd,                # empirical cross-spectral density
-        1e-1,                 # tolerance
-        [np, ny, nq, nh],     # number of parameters, number of data points, number of Qs, number of hyperparameters
-        [μθ_pr, hyperpriors[:μλ_pr]],          # parameter and hyperparameter prior mean
-        [inv(Σθ_pr), hyperpriors[:Πλ_pr]],     # parameter and hyperparameter prior precision matrices
-        Q                                      # components of data precision matrix
+        f,                                    # function that computes the cross-spectral density at fixed point 'initcond'
+        y_csd,                                # empirical cross-spectral density
+        1e-1,                                 # tolerance
+        [nr, np, ny, nq, nh],                 # number of parameters, number of data points, number of Qs, number of hyperparameters
+        [μθ_pr, hyperpriors.μλ_pr],           # parameter and hyperparameter prior mean
+        [inv(Σθ_pr), hyperpriors.Πλ_pr],      # parameter and hyperparameter prior precision matrices
+        Q,                                    # components of data precision matrix
+        modelparam
     )
     return (vlstate, vlsetup)
 end
@@ -270,23 +269,18 @@ end
     - `priors`: Bayesian priors, mean and variance thereof. Laplace approximation assumes Gaussian distributions
     - `niter`: number of iterations of the optimization procedure
 """
-function run_sDCM_iteration!(state::VLState, setup::VLSetup)
-    μθ_po = state.μθ_po
-
-    λ = state.λ
-    v = state.v
-    ϵ_θ = state.ϵ_θ
-    dFdθ = state.dFdθ
-    dFdθθ = state.dFdθθ
+function run_spDCM_iteration!(state::VLState, setup::VLSetup)
+    (;μθ_po, λ, v, ϵ_θ, dFdθ, dFdθθ) = state
 
     f = setup.model_at_x0
     y = setup.y_csd              # cross-spectral density
-    (np, ny, nq, nh) = setup.systemnums
+    (nr, np, ny, nq, nh) = setup.systemnums
     (μθ_pr, μλ_pr) = setup.systemvecs
     (Πθ_pr, Πλ_pr) = setup.systemmatrices
     Q = setup.Q
 
     dfdp = jacobian(f, μθ_po)
+
     norm_dfdp = opnorm(dfdp, Inf);
     revert = isnan(norm_dfdp) || norm_dfdp > exp(32);
 
@@ -294,18 +288,13 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
         for i = 1:4
             # reset expansion point and increase regularization
             v = min(v - 2, -4);
-            t = exp(v - logdet(dFdθθ)/np)
 
             # E-Step: update
-            if t > exp(16)
-                ϵ_θ = ϵ_θ - dFdθθ \ dFdθ    # -inv(dfdx)*f
-            else
-                ϵ_θ = ϵ_θ + expv(t, dFdθθ, dFdθθ \ dFdθ) - dFdθθ \ dFdθ   # (expm(dfdx*t) - I)*inv(dfdx)*f
-            end
+            ϵ_θ += integration_step(dFdθθ, dFdθ, v)
 
             μθ_po = μθ_pr + ϵ_θ
 
-            dfdp = jacobian(f, μθ_po)
+            dfdp = ForwardDiff.jacobian(f, μθ_po)
 
             # check for stability
             norm_dfdp = opnorm(dfdp, Inf);
@@ -336,10 +325,11 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
 
         Pp = real(J' * iΣ * J)    # in MATLAB code 'real()' is applied to the resulting matrix product, why is this okay?
         Σθ_po = inv(Pp + Πθ_pr)
+
         if nh > 1
             for i = 1:nh
                 P[:,:,i] = Q[:,:,i]*exp(λ[i])
-                PΣ[:,:,i] = real(iΣ \ P[:,:,i])
+                PΣ[:,:,i] = iΣ \ P[:,:,i]
                 JPJ[:,:,i] = real(J'*P[:,:,i]*J)      # in MATLAB code 'real()' is applied (see also some lines above)
             end
             for i = 1:nh
@@ -350,30 +340,33 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
                 end
             end
         else
+            # if nh == 1, do the followng simplifications to improve computational speed:          
+            # 1. replace trace(PΣ[1]) * nq by ny
+            # 2. replace JPJ[1] by Pp
             dFdλ[1, 1] = ny/2 - real(ϵ'*iΣ*ϵ)/2 - tr(Σθ_po * Pp)/2;
+
+            # 3. replace trace(PΣ[1],PΣ[1]) * nq by ny
             dFdλλ[1, 1] = - ny/2;
         end
 
-        dFdλλ = dFdλλ + diagm(dFdλ);
+        dFdλλ = dFdλλ + diagm(dFdλ);      # add second order terms; noting diΣ/dλ(i)dλ(i) = diΣ/dλ(i) = P{i}
+
         ϵ_λ = λ - μλ_pr
         dFdλ = dFdλ - Πλ_pr*ϵ_λ
         dFdλλ = dFdλλ - Πλ_pr
         Σλ_po = inv(-dFdλλ)
 
-        t = exp(4 - spm_logdet(dFdλλ)/length(λ))
         # E-Step: update
-        if t > exp(16)
-            dλ = -real(dFdλλ \ dFdλ)
-        else
-            idFdλλ = inv(dFdλλ)
-            dλ = real(exponential!(t * dFdλλ) * idFdλλ*dFdλ - idFdλλ*dFdλ)   # (expm(dfdx*t) - I)*inv(dfdx)*f ~~~ could also be done with expv but doesn't work with Dual.
-        end
+        dλ = real(integration_step(dFdλλ, dFdλ, 4))
 
         dλ = [min(max(x, -1.0), 1.0) for x in dλ]      # probably precaution for numerical instabilities?
         λ = λ + dλ
 
         dF = dot(dFdλ, dλ)
 
+        # NB: it is unclear as to whether this is being reached. In this first tests iterations seem to be 
+        # trapped in a periodic orbit jumping around between 1250 and 940. At that point the results become
+        # somewhat arbitrary. The iterations stop at 8, whatever the last value of iΣ etc. is will be carried on.
         if real(dF) < 1e-2
             break
         end
@@ -404,12 +397,7 @@ function run_sDCM_iteration!(state::VLState, setup::VLSetup)
     end
 
     # E-Step: update
-    t = exp(v - spm_logdet(dFdθθ)/np)
-    if t > exp(16)
-        dθ = - inv(dFdθθ) * dFdθ     # -inv(dfdx)*f
-    else
-        dθ = exp(t * dFdθθ) * inv(dFdθθ) * dFdθ - inv(dFdθθ) * dFdθ     # (expm(dfdx*t) - I)*inv(dfdx)*f
-    end
+    dθ = integration_step(dFdθθ, dFdθ, v, true)
 
     ϵ_θ += dθ
     state.μθ_po = μθ_pr + ϵ_θ
