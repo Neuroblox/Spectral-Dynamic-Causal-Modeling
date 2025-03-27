@@ -103,45 +103,7 @@ for (i, r) in enumerate(rnames)
     end
 end
 
-modelparam = OrderedDict()
-np = sum(tunable_parameters(fullmodel); init=0) do par
-    val = Symbolics.getdefaultval(par)
-    modelparam[par] = val
-    length(val)
-end
-indices = Dict(:dspars => collect(1:np))
-# Noise parameter mean
-modelparam[:lnα] = zeros(Float64, 2, nd);           # intrinsic fluctuations, ln(α) as in equation 2 of Friston et al. 2014 
-n = length(modelparam[:lnα]);
-indices[:lnα] = collect(np+1:np+n);
-np += n;
-modelparam[:lnβ] = [-16.0, -16.0];           # global observation noise, ln(β) as above
-n = length(modelparam[:lnβ]);
-indices[:lnβ] = collect(np+1:np+n);
-np += n;
-modelparam[:lnγ] = [-16.0, -16.0];   # region specific observation noise
-indices[:lnγ] = collect(np+1:np+nd);
-np += nd
-indices[:u] = idx_u
-indices[:m] = idx_measurement
-indices[:sts] = idx_sts
-
-# define prior variances
-paramvariance = copy(modelparam)
-paramvariance[:lnα] = ones(Float64, size(modelparam[:lnα]))./128.0; 
-paramvariance[:lnβ] = ones(Float64, nd)./128.0;
-paramvariance[:lnγ] = ones(Float64, nd)./128.0;
-for (k, v) in paramvariance
-    if occursin("a_", string(k))
-        paramvariance[k] = 1/16.0
-    elseif "lnr" == string(k)
-        paramvariance[k] = 1/64.0;
-    elseif occursin("lnτ", string(k))
-        paramvariance[k] = 1/32.0;
-    elseif occursin("lf₊L", string(k))
-        paramvariance[k] = 64;
-    end
-end
+pmean, pcovariance, indices = defaultprior(neuronmodel, nrr)
 
 priors = DataFrame(name=[k for k in keys(modelparam)], mean=[m for m in values(modelparam)], variance=[v for v in values(paramvariance)])
 hype = matread("speedandaccuracy/matlab_cmc_hyperpriors.mat");
@@ -153,21 +115,15 @@ hyperpriors = Dict(:Πλ_pr => hype["ihC"],            # prior metaparameter pre
 csdsetup = Dict(:p => 8, :freq => vec(vars["Hz"]), :dt => vars["dt"]);
 
 (state, setup) = setup_sDCM(data, fullmodel, initcond, csdsetup, priors, hyperpriors, indices, "LFP");
-# HACK: on machines with very small amounts of RAM, Julia can run out of stack space while compiling the code called in this loop
-# this should be rewritten to abuse the compiler less, but for now, an easy solution is just to run it with more allocated stack space.
-with_stack(f, n) = fetch(schedule(Task(f,n)))
-
-with_stack(5_000_000) do  # 5MB of stack space
-    for iter in 1:128
-        state.iter = iter
-        run_sDCM_iteration!(state, setup)
-        print("iteration: ", iter, " - F:", state.F[end] - state.F[2], " - dF predicted:", state.dF[end], "\n")
-        if iter >= 4
-            criterion = state.dF[end-3:end] .< setup.tolerance
-            if all(criterion)
-                print("convergence\n")
-                break
-            end
+for iter in 1:128
+    state.iter = iter
+    run_sDCM_iteration!(state, setup)
+    print("iteration: ", iter, " - F:", state.F[end] - state.F[2], " - dF predicted:", state.dF[end], "\n")
+    if iter >= 4
+        criterion = state.dF[end-3:end] .< setup.tolerance
+        if all(criterion)
+            print("convergence\n")
+            break
         end
     end
 end
